@@ -37,6 +37,7 @@ namespace {
     xxx(MonitoringUrlData,               TMonitoringUrlData,  {}              )\
     xxx(ReportHistogramAsMultipleCounters,  bool,            true             )\
     xxx(ReportHistogramAsSingleCounter,     bool,            false            )\
+    xxx(StatsFetcherType, NProto::EStatsFetcherType, NProto::EStatsFetcherType::CGROUP )\
 // FILESTORE_DIAGNOSTICS_CONFIG
 
 #define FILESTORE_DIAGNOSTICS_DECLARE_CONFIG(name, type, value)                \
@@ -169,4 +170,13 @@ void Out<NCloud::NFileStore::TMonitoringUrlData>(
     v.SetMonitoringUrl(value.MonitoringUrl);
     v.SetMonitoringProject(value.MonitoringProject);
     SerializeToTextFormat(v, out);
+}
+
+template <>
+void Out<NCloud::NFileStore::NProto::EStatsFetcherType>(
+    IOutputStream& out,
+    NCloud::NFileStore::NProto::EStatsFetcherType statsFetcherType)
+{
+    out << NCloud::NFileStore::NProto::EStatsFetcherType_Name(
+        statsFetcherType);
 }

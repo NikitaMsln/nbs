@@ -194,7 +194,7 @@ struct TVolumeStatsTestMock final
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct TCgroupStatsFetcherMock: public NCloud::NStorage::ICgroupStatsFetcher
+struct TStatsFetcherMock: public NCloud::NStorage::IStatsFetcher
 {
     TDuration Value;
 
@@ -230,14 +230,14 @@ private:
 
 public:
     std::shared_ptr<TVolumeStatsTestMock> VolumeStats;
-    std::shared_ptr<TCgroupStatsFetcherMock> Fetcher;
+    std::shared_ptr<TStatsFetcherMock> Fetcher;
 
 public:
     TVolumeBalancerTestEnv()
     {
         Sender = TestEnv.GetRuntime().AllocateEdgeActor();
         VolumeStats = std::make_shared<TVolumeStatsTestMock>();
-        Fetcher = std::make_shared<TCgroupStatsFetcherMock>();
+        Fetcher = std::make_shared<TStatsFetcherMock>();
     }
 
     TActorId GetEdgeActor() const
@@ -411,7 +411,7 @@ NFeatures::TFeaturesConfigPtr CreateFeatureConfig(
 IActorPtr CreateVolumeBalancerActor(
     TVolumeBalancerConfigBuilder& config,
     IVolumeStatsPtr volumeStats,
-    NCloud::NStorage::ICgroupStatsFetcherPtr cgroupStatsFetcher,
+    NCloud::NStorage::IStatsFetcherPtr statsFetcher,
     TActorId serviceActorId)
 {
     NProto::TStorageServiceConfig storageConfig = config.Build();
@@ -425,7 +425,7 @@ IActorPtr CreateVolumeBalancerActor(
             CreateFeatureConfig("Balancer", {})
         ),
         std::move(volumeStats),
-        std::move(cgroupStatsFetcher),
+        std::move(statsFetcher),
         std::move(volumeBalancerSwitch),
         std::move(serviceActorId));
 }

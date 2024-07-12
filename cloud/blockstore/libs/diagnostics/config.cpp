@@ -55,6 +55,7 @@ namespace {
     xxx(LocalHDDDowntimeThreshold,           TDuration,       TDuration::Seconds(15)                    )\
     xxx(ReportHistogramAsMultipleCounters,   bool,            true                                      )\
     xxx(ReportHistogramAsSingleCounter,      bool,            false                                     )\
+    xxx(StatsFetcherType,     NProto::EStatsFetcherType,      NProto::EStatsFetcherType::CGROUP         )\
 // BLOCKSTORE_DIAGNOSTICS_CONFIG
 
 #define BLOCKSTORE_DIAGNOSTICS_DECLARE_CONFIG(name, type, value)               \
@@ -306,4 +307,13 @@ void Out<NCloud::TRequestThresholds>(
     const NCloud::TRequestThresholds& value)
 {
     OutRequestThresholds(out, value);
+}
+
+template <>
+void Out<NCloud::NBlockStore::NProto::EStatsFetcherType>(
+    IOutputStream& out,
+    NCloud::NBlockStore::NProto::EStatsFetcherType statsFetcherType)
+{
+    out << NCloud::NBlockStore::NProto::EStatsFetcherType_Name(
+        statsFetcherType);
 }

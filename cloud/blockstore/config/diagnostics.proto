@@ -76,6 +76,15 @@ message TMonitoringUrlData
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+// StatsFetcher type
+
+enum EStatsFetcherType
+{
+    CGROUP = 0;
+    KERNEL_TASK_DELAYACCT = 1;
+};
+
+////////////////////////////////////////////////////////////////////////////////
 
 message TDiagnosticsConfig
 {
@@ -216,4 +225,7 @@ message TDiagnosticsConfig
 
     // Performance measurements coefficients for local HDD disks.
     optional TVolumePerfSettings LocalHDDPerfSettings = 51;
+
+    // Type of fetching CPU stats
+    optional EStatsFetcherType StatsFetcherType = 52;
 }

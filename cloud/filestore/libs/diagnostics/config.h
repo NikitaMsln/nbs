@@ -71,6 +71,8 @@ public:
     bool GetReportHistogramAsSingleCounter() const;
     EHistogramCounterOptions GetHistogramCounterOptions() const;
 
+    NProto::EStatsFetcherType GetStatsFetcherType() const;
+
     void Dump(IOutputStream& out) const;
     void DumpHtml(IOutputStream& out) const;
 };
