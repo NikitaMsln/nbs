@@ -286,6 +286,8 @@ public:
 
     bool GetTwoStageReadDisabledForHDD() const;
     bool GetThreeStageWriteDisabledForHDD() const;
+
+    bool GetGuestWritebackCacheEnabled() const;
 };
 
 }   // namespace NCloud::NFileStore::NStorage
