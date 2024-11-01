@@ -10,7 +10,7 @@ TProcessingBlocks::TProcessingBlocks(
         ui64 initialProcessingIndex)
     : BlockCount(blockCount)
     , BlockSize(blockSize)
-    , BlockMap(std::make_unique<TCompressedBitmap>(BlockCount))
+    , BlockMap(std::make_shared<TCompressedBitmap>(BlockCount))
     , CurrentProcessingIndex(initialProcessingIndex)
     , NextProcessingIndex(CalculateNextProcessingIndex())
 {
@@ -18,6 +18,23 @@ TProcessingBlocks::TProcessingBlocks(
         MarkProcessed(TBlockRange64::WithLength(0, CurrentProcessingIndex));
     }
 }
+
+TProcessingBlocks::TProcessingBlocks(
+    ui64 blockCount,
+    ui32 blockSize,
+    std::shared_ptr<TCompressedBitmap> blockMap)
+    : BlockCount(blockCount)
+    , BlockSize(blockSize)
+    , BlockMap(std::move(blockMap))
+{
+    SkipProcessedRanges();
+}
+
+TProcessingBlocks::TProcessingBlocks(
+    TProcessingBlocks&& other) noexcept = default;
+
+TProcessingBlocks& TProcessingBlocks::operator=(
+    TProcessingBlocks&& other) noexcept = default;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -101,7 +118,7 @@ ui64 TProcessingBlocks::GetBlockCountNeedToBeProcessed() const
 
 ui64 TProcessingBlocks::GetProcessedBlockCount() const
 {
-    if (BlockMap) {
+    if (IsProcessing()) {
         return BlockMap->Count();
     }
     return BlockCount;

@@ -118,6 +118,39 @@ struct TEvVolume
     };
 
     //
+    // UpdateSmartResyncState
+    //
+
+    struct TUpdateSmartResyncState
+    {
+        TString AgentId;
+        ui64 ProcessedBlockCount;
+        ui64 BlockCountNeedToBeProcessed;
+
+        TUpdateSmartResyncState(
+                TString agentId,
+                ui64 processedBlockCount,
+                ui64 blockCountNeedToBeProcessed)
+            : AgentId(std::move(agentId))
+            , ProcessedBlockCount(processedBlockCount)
+            , BlockCountNeedToBeProcessed(blockCountNeedToBeProcessed)
+        {}
+    };
+
+    //
+    // SmartResyncFinished
+    //
+
+    struct TSmartResyncFinished
+    {
+        const TString AgentId;
+
+        explicit TSmartResyncFinished(TString agentId)
+            : AgentId(std::move(agentId))
+        {}
+    };
+
+    //
     // RWClientIdChanged
     //
 
@@ -237,6 +270,26 @@ struct TEvVolume
         {}
     };
 
+    struct TDeviceTimeoutedRequest
+    {
+        ui32 DeviceIndex;
+        TString DeviceUUID;
+
+        TDeviceTimeoutedRequest(ui32 deviceIndex, TString deviceUUID)
+            : DeviceIndex(deviceIndex)
+            , DeviceUUID(std::move(deviceUUID))
+        {}
+    };
+
+    struct TDeviceTimeoutedResponse
+    {
+
+        // TDeviceTimeoutedRequest()
+        //     : DeviceIndex(deviceIndex)
+        //     , DeviceUUID(std::move(deviceUUID))
+        // {}
+    };
+
     //
     // Events declaration
     //
@@ -331,6 +384,12 @@ struct TEvVolume
         EvGetStorageConfigRequest = EvBegin + 58,
         EvGetStorageConfigResponse = EvBegin + 59,
 
+        EvDeviceTimeoutedRequest = EvBegin + 60,
+        EvDeviceTimeoutedResponse = EvBegin + 61,
+
+        EvUpdateSmartResyncState = EvBegin + 62,
+        EvSmartResyncFinished = EvBegin + 63,
+
         EvEnd
     };
 
@@ -352,6 +411,16 @@ struct TEvVolume
     using TEvMigrationStateUpdated = TRequestEvent<
         TMigrationStateUpdated,
         EvMigrationStateUpdated
+    >;
+
+    using TEvUpdateSmartResyncState = TRequestEvent<
+        TUpdateSmartResyncState,
+        EvUpdateSmartResyncState
+    >;
+
+    using TEvSmartResyncFinished = TRequestEvent<
+        TSmartResyncFinished,
+        EvSmartResyncFinished
     >;
 
     using TEvRWClientIdChanged = TRequestEvent<
@@ -402,6 +471,16 @@ struct TEvVolume
     using TEvPreparePartitionMigrationResponse = TRequestEvent<
         TPreparePartitionMigrationResponse,
         EvPreparePartitionMigrationResponse
+    >;
+
+    using TEvDeviceTimeoutedRequest = TRequestEvent<
+        TDeviceTimeoutedRequest,
+        EvDeviceTimeoutedRequest
+    >;
+
+    using TEvDeviceTimeoutedResponse = TResponseEvent<
+        TDeviceTimeoutedResponse,
+        EvDeviceTimeoutedResponse
     >;
 };
 

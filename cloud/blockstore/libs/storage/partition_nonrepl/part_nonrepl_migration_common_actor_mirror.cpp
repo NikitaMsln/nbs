@@ -113,7 +113,7 @@ void TNonreplicatedPartitionMigrationCommonActor::MirrorRequest(
         WriteAndZeroRequestsInProgress.AddWriteRequest(range));
 
     if constexpr (IsExactlyWriteMethod<TMethod>) {
-        ChangedRangesMap.MarkChanged(range);
+        NonZeroRangesMap.MarkChanged(range);
     }
 }
 

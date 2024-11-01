@@ -175,6 +175,23 @@ message TDeviceConfig
 
 ////////////////////////////////////////////////////////////////////////////////
 
+message TUnavailableAgent
+{
+    string AgentId = 1;
+
+    // 0 for main devices, 1 and 2 for miror replicas.
+    uint32 ReplicaIndex = 2;
+
+    repeated uint32 DevicesIndexes = 3;
+}
+
+message TLaggingAgentsInfo
+{
+    repeated TUnavailableAgent Agents = 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 message TSuspendedDevice
 {
     string Id = 1;

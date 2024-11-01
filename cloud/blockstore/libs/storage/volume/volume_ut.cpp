@@ -1453,7 +1453,7 @@ Y_UNIT_TEST_SUITE(TVolumeTest)
         );
         runtime->DispatchEvents({}, TDuration::Seconds(1));
         UNIT_ASSERT_VALUES_EQUAL(1, migrationStartedCounter);
-        UNIT_ASSERT_VALUES_EQUAL(60, migrationProgressCounter);
+        UNIT_ASSERT_VALUES_EQUAL(56, migrationProgressCounter);
 
         volume.RebootTablet();
         volume.AddClient(clientInfo);
@@ -1522,6 +1522,171 @@ Y_UNIT_TEST_SUITE(TVolumeTest)
             UNIT_ASSERT_VALUES_EQUAL(GetBlockContent(3), bufs[0]);
         }
     }
+
+    // Y_UNIT_TEST(ShouldRestoreMigrationIndexAfterReboot)
+    // {
+    //     const auto blocksPerDevice =
+    //         DefaultDeviceBlockCount * DefaultDeviceBlockSize / DefaultBlockSize;
+    //     const auto indexCachingInterval = blocksPerDevice / 10;
+    //     UNIT_ASSERT(indexCachingInterval > 0);
+
+    //     NProto::TStorageServiceConfig config;
+    //     config.SetAcquireNonReplicatedDevices(true);
+    //     config.SetMaxMigrationBandwidth(999'999'999);
+    //     config.SetMigrationIndexCachingInterval(indexCachingInterval);
+    //     config.SetMaxMigrationIoDepth(4);
+    //     auto state = MakeIntrusive<TDiskRegistryState>();
+    //     auto runtime = PrepareTestActorRuntime(config, state);
+
+    //     TVolumeClient volume(*runtime);
+
+    //     // creating a nonreplicated disk
+    //     volume.UpdateVolumeConfig(
+    //         0,
+    //         0,
+    //         0,
+    //         0,
+    //         false,
+    //         1,
+    //         NCloud::NProto::STORAGE_MEDIA_SSD_NONREPLICATED,
+    //         2.5 * blocksPerDevice
+    //     );
+
+    //     volume.WaitReady();
+
+    //     // registering a writer
+    //     auto clientInfo = CreateVolumeClientInfo(
+    //         NProto::VOLUME_ACCESS_READ_WRITE,
+    //         NProto::VOLUME_MOUNT_LOCAL,
+    //         0);
+    //     volume.AddClient(clientInfo);
+
+    //     // writing some data whose migration we will test
+    //     const auto range1 = TBlockRange64::MakeOneBlock(5);
+    //     const auto range2 = TBlockRange64::MakeOneBlock(5 + blocksPerDevice);
+    //     const auto range3 =
+    //         TBlockRange64::MakeOneBlock(5 + 2 * blocksPerDevice);
+    //     volume.WriteBlocks(range1, clientInfo.GetClientId(), 1);
+    //     volume.WriteBlocks(range2, clientInfo.GetClientId(), 2);
+    //     volume.WriteBlocks(range3, clientInfo.GetClientId(), 3);
+
+    //     state->MigrationMode = EMigrationMode::InProgress;
+
+    //     const auto midIndex = range2.Start;
+    //     ui32 migrationStartedCounter = 0;
+    //     ui32 migrationProgressCounter = 0;
+
+    //     bool drop = false;
+    //     runtime->SetObserverFunc([&] (TAutoPtr<IEventHandle>& event) {
+    //             const auto migratedEvent =
+    //                 TEvNonreplPartitionPrivate::EvRangeMigrated;
+    //             using TMigratedEvent =
+    //                 TEvNonreplPartitionPrivate::TEvRangeMigrated;
+    //             if (event->GetTypeRewrite() == migratedEvent) {
+    //                 auto* msg = event->Get<TMigratedEvent>();
+    //                 if (msg->Range.Start > midIndex) {
+    //                     drop = true;
+    //                     return TTestActorRuntime::EEventAction::DROP;
+    //                 }
+    //             } else if (event->Recipient == MakeStorageStatsServiceId()
+    //                     && event->GetTypeRewrite() == TEvStatsService::EvVolumeSelfCounters)
+    //             {
+    //                 auto* msg = event->Get<TEvStatsService::TEvVolumeSelfCounters>();
+
+    //                 migrationStartedCounter =
+    //                     msg->VolumeSelfCounters->Simple.MigrationStarted.Value;
+    //                 migrationProgressCounter =
+    //                     msg->VolumeSelfCounters->Simple.MigrationProgress.Value;
+    //             }
+
+    //             return TTestActorRuntime::DefaultObserverFunc(event);
+    //         }
+    //     );
+
+    //     // reallocating disk
+    //     volume.ReallocateDisk();
+    //     volume.ReconnectPipe();
+    //     volume.AddClient(clientInfo);
+    //     volume.WaitReady();
+
+    //     runtime->DispatchEvents({}, TDuration::Seconds(1));
+    //     UNIT_ASSERT(drop);
+    //     UNIT_ASSERT_VALUES_EQUAL(0, state->FinishMigrationRequests);
+
+    //     volume.SendToPipe(
+    //         std::make_unique<TEvVolumePrivate::TEvUpdateCounters>()
+    //     );
+    //     runtime->DispatchEvents({}, TDuration::Seconds(1));
+    //     UNIT_ASSERT_VALUES_EQUAL(1, migrationStartedCounter);
+    //     UNIT_ASSERT_VALUES_EQUAL(56, migrationProgressCounter);
+
+    //     volume.RebootTablet();
+    //     volume.AddClient(clientInfo);
+
+    //     runtime->SetObserverFunc([&] (TAutoPtr<IEventHandle>& event) {
+    //             const auto migratedEvent =
+    //                 TEvNonreplPartitionPrivate::EvRangeMigrated;
+    //             using TMigratedEvent =
+    //                 TEvNonreplPartitionPrivate::TEvRangeMigrated;
+    //             if (event->GetTypeRewrite() == migratedEvent) {
+    //                 auto* msg = event->Get<TMigratedEvent>();
+    //                 UNIT_ASSERT_C(
+    //                     msg->Range.Start > midIndex - indexCachingInterval,
+    //                     TStringBuilder() << "lagging migration index: " << msg->Range.Start
+    //                 );
+    //             }
+
+    //             return TTestActorRuntime::DefaultObserverFunc(event);
+    //         }
+    //     );
+
+    //     volume.WaitReady();
+
+    //     // checking that DR was notified about a finished migration
+    //     UNIT_ASSERT_VALUES_EQUAL(1, state->FinishMigrationRequests);
+
+    //     state->MigrationMode = EMigrationMode::Finish;
+
+    //     // reallocating disk
+    //     volume.ReallocateDisk();
+    //     volume.ReconnectPipe();
+    //     volume.AddClient(clientInfo);
+    //     volume.WaitReady();
+
+    //     // checking that our volume sees new device list
+    //     {
+    //         auto stat = volume.StatVolume();
+    //         const auto& devices = stat->Record.GetVolume().GetDevices();
+    //         const auto& migrations = stat->Record.GetVolume().GetMigrations();
+    //         UNIT_ASSERT_VALUES_EQUAL(3, devices.size());
+    //         UNIT_ASSERT_VALUES_EQUAL("transport0_migration", devices[0].GetTransportId());
+    //         UNIT_ASSERT_VALUES_EQUAL("transport1", devices[1].GetTransportId());
+    //         UNIT_ASSERT_VALUES_EQUAL("transport2_migration", devices[2].GetTransportId());
+    //         UNIT_ASSERT_VALUES_EQUAL(0, migrations.size());
+    //     }
+
+    //     // checking that our data has been in fact migrated
+    //     {
+    //         auto resp = volume.ReadBlocks(range1, clientInfo.GetClientId());
+    //         const auto& bufs = resp->Record.GetBlocks().GetBuffers();
+    //         UNIT_ASSERT_VALUES_EQUAL(1, bufs.size());
+    //         UNIT_ASSERT_VALUES_EQUAL(GetBlockContent(1), bufs[0]);
+    //     }
+
+    //     {
+    //         auto resp = volume.ReadBlocks(range2, clientInfo.GetClientId());
+    //         const auto& bufs = resp->Record.GetBlocks().GetBuffers();
+    //         UNIT_ASSERT_VALUES_EQUAL(1, bufs.size());
+    //         UNIT_ASSERT_VALUES_EQUAL(GetBlockContent(2), bufs[0]);
+    //     }
+
+    //     {
+    //         auto resp = volume.ReadBlocks(range3, clientInfo.GetClientId());
+    //         const auto& bufs = resp->Record.GetBlocks().GetBuffers();
+    //         UNIT_ASSERT_VALUES_EQUAL(1, bufs.size());
+    //         UNIT_ASSERT_VALUES_EQUAL(GetBlockContent(3), bufs[0]);
+    //     }
+    // }
 
     Y_UNIT_TEST(ShouldThrottleMigration)
     {

@@ -304,6 +304,23 @@ public:
         Meta.SetFillSeqNumber(fillSeqNumber);
     }
 
+    void AddLaggingAgent(NProto::TUnavailableAgent agent)
+    {
+        Meta.MutableLaggingAgentsInfo()->MutableAgents()->Add(std::move(agent));
+    }
+
+    void RemoveLaggingAgent(const TString& agentId)
+    {
+        const auto& laggingAgents = Meta.GetLaggingAgentsInfo().GetAgents();
+        auto it = FindIf(
+            laggingAgents,
+            [&agentId](const auto& agent)
+            { return agent.GetAgentId() == agentId; });
+        if (it != laggingAgents.end()) {
+            Meta.MutableLaggingAgentsInfo()->MutableAgents()->erase(it);
+        }
+    }
+
     void SetStartPartitionsNeeded(bool startPartitionsNeeded)
     {
         StartPartitionsNeeded = startPartitionsNeeded;

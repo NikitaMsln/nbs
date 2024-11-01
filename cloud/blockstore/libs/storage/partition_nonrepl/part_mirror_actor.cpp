@@ -3,6 +3,7 @@
 #include "part_nonrepl.h"
 #include "part_nonrepl_migration.h"
 #include "resync_range.h"
+#include "incomplete_mirror_rw_mode_controller_actor.h"
 
 #include <cloud/blockstore/libs/diagnostics/critical_events.h>
 
@@ -19,6 +20,8 @@ namespace NCloud::NBlockStore::NStorage {
 using namespace NActors;
 
 using namespace NKikimr;
+
+using TEvPartition = NPartition::TEvPartition;
 
 LWTRACE_USING(BLOCKSTORE_STORAGE_PROVIDER);
 
@@ -475,6 +478,119 @@ void TMirrorPartitionActor::HandleRangeResynced(
     StartScrubbingRange(ctx, ScrubbingRangeId + 1);
 }
 
+void TMirrorPartitionActor::HandleEnterIncompleteMirrorRWMode(
+    const TEvPartition::TEvEnterIncompleteMirrorRWModeRequest::TPtr& ev,
+    const TActorContext& ctx)
+{
+    const auto* msg = ev->Get();
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "[%s] EnterIncompleteMirrorRWMode %s, ReplicaIndex: %u",
+        DiskId.c_str(),
+        msg->AgentId.c_str(),
+        msg->ReplicaIndex);
+
+    // if (State.GetIncompleteIOReplicaIndex() &&
+    //           State.GetIncompleteIOReplicaIndex() != msg->ReplicaIndex)
+    // {
+    //     NCloud::Reply(
+    //         ctx,
+    //         *ev,
+    //         std::make_unique<TEvPartition::TEvEnterIncompleteMirrorRWModeResponse>(
+    //             MakeError(
+    //                 E_INVALID_STATE,
+    //                 TStringBuilder()
+    //                     << "Cant enter incomplete IO mode in replica: "
+    //                     << msg->ReplicaIndex
+    //                     << ". Already in incomplete mode with index: "
+    //                     << *State.GetIncompleteIOReplicaIndex())));
+    //         return;
+    // }
+
+
+
+    // Pre initialize bitmap with curret write requests.
+
+    // create controller if not already
+
+    // Send message to it with agent id
+
+    if (!State.IsProxySet(msg->ReplicaIndex)) {
+        Y_DEBUG_ABORT_UNLESS(
+            State.GetReplicaInfos().size() > msg->ReplicaIndex);
+        Y_DEBUG_ABORT_UNLESS(
+            State.GetRealReplicaActors().size() > msg->ReplicaIndex);
+
+        auto proxyActorId = NCloud::Register(
+            ctx,
+            std::make_unique<TIncompleteMirrorRWModeControllerActor>(
+                Config,
+                State.GetReplicaInfos()[msg->ReplicaIndex].Config,
+                ProfileLog,
+                BlockDigestGenerator,
+                State.GetRWClientId(),
+                State.GetRealReplicaActors()[msg->ReplicaIndex],
+                StatActorId,
+                SelfId()));
+        auto error = State.SetReplicaProxy(msg->ReplicaIndex, proxyActorId);
+        if (HasError(error)) {
+            NCloud::Reply(
+                ctx,
+                *ev,
+                std::make_unique<
+                    TEvPartition::TEvEnterIncompleteMirrorRWModeResponse>(
+                    error));
+
+            LOG_ERROR(
+                ctx,
+                TBlockStoreComponents::PARTITION,
+                "[%s] Cant set replica proxy.",
+                DiskId.c_str());
+            return;
+        }
+    }
+
+    NCloud::Send<NPartition::TEvPartition::TEvAgentIsUnavailable>(
+        ctx,
+        State.GetReplicaActors()[msg->ReplicaIndex],
+        0,   // cookie
+        msg->AgentId);
+
+    NCloud::Reply(
+        ctx,
+        *ev,
+        std::make_unique<TEvPartition::TEvEnterIncompleteMirrorRWModeResponse>());
+}
+
+void TMirrorPartitionActor::HandleExitIncompleteMirrorRWMode(
+    const TEvPartition::TEvExitIncompleteMirrorRWModeRequest::TPtr& ev,
+    const TActorContext& ctx)
+{
+    const auto* msg = ev->Get();
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "[%s] ExitIncompleteMirrorRWMode %s, ReplicaIndex: %u",
+        DiskId.c_str(),
+        msg->AgentId.c_str(),
+        msg->ReplicaIndex);
+
+    if (State.GetReplicaActors().size() <= msg->ReplicaIndex) {
+        Y_DEBUG_ABORT_UNLESS(false);
+        return;
+    }
+
+    // TODO: What happens with in-flight requests?
+    // DO NOT POISON IF THERE IS MORE THAT ONE UNAVAILABLE AGENT.
+    if (State.IsProxySet(msg->ReplicaIndex)) {
+        auto proxy = State.GetReplicaActors()[msg->ReplicaIndex];
+        NCloud::Send<TEvents::TEvPoisonPill>(ctx, proxy);
+        auto error = State.ResetReplicaProxy(msg->ReplicaIndex);
+        Y_DEBUG_ABORT_UNLESS(!HasError(error));
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 void TMirrorPartitionActor::HandleRWClientIdChanged(
@@ -544,7 +660,10 @@ STFUNC(TMirrorPartitionActor::StateWork)
         HFunc(TEvService::TEvReadBlocksLocalRequest, HandleReadBlocksLocal);
         HFunc(TEvService::TEvWriteBlocksLocalRequest, HandleWriteBlocksLocal);
 
-        HFunc(NPartition::TEvPartition::TEvDrainRequest, DrainActorCompanion.HandleDrain);
+        HFunc(TEvPartition::TEvDrainRequest, DrainActorCompanion.HandleDrain);
+        HFunc(TEvPartition::TEvEnterIncompleteMirrorRWModeRequest, HandleEnterIncompleteMirrorRWMode);
+        HFunc(TEvPartition::TEvExitIncompleteMirrorRWModeRequest, HandleExitIncompleteMirrorRWMode);
+
         HFunc(
             TEvService::TEvGetChangedBlocksRequest,
             GetChangedBlocksCompanion.HandleGetChangedBlocks);

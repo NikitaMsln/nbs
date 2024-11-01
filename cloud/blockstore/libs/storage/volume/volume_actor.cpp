@@ -14,6 +14,8 @@
 // TODO: invalid reference
 #include <cloud/blockstore/libs/storage/service/service_events_private.h>
 
+#include <cloud/storage/core/libs/common/media.h>
+#include "cloud/storage/core/libs/diagnostics/critical_events.h"
 #include <cloud/storage/core/libs/throttling/tablet_throttler.h>
 #include <cloud/storage/core/libs/throttling/tablet_throttler_logger.h>
 
@@ -846,6 +848,344 @@ void TVolumeActor::HandleGetStorageConfig(
         std::move(response));
 }
 
+void TVolumeActor::HandleDeviceTimeouted(
+    const TEvVolume::TEvDeviceTimeoutedRequest::TPtr& ev,
+    const TActorContext& ctx)
+{
+    const auto* msg = ev->Get();
+
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::VOLUME,
+        "[%lu] Device \"%s\" timeouted. DeviceIndex: %u",
+        TabletID(),
+        msg->DeviceUUID.c_str(),
+        msg->DeviceIndex);
+
+    const auto& meta = State->GetMeta();
+    const auto& config = meta.GetVolumeConfig();
+    const auto mediaKind = static_cast<NCloud::NProto::EStorageMediaKind>(
+        config.GetStorageMediaKind());
+    if (!IsReliableDiskRegistryMediaKind(mediaKind)) {
+        NCloud::Reply(
+            ctx,
+            *ev,
+            std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>());
+        return;
+    }
+
+    // What if snapshoting via shadow disk?
+    // What if snapshoting via old method?
+    // What if migrating?
+    // What if mirroring to fresh?
+    // What if resyncing?
+    // small resyncs (new feature) ?
+
+    // Device list can change (resize, migrations, freshes, reallocates).
+    // If lagging device is removed -> we need to remove it from DB.
+    // If device is added, maybe should check that it belongs to some lagging agent.
+
+    // It's safer to do nothing.
+    // ??????????????????????
+    // if (UpdateVolumeConfigInProgress) {
+    //     auto response =
+    //         std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>();
+    //     NCloud::Reply(ctx, *ev, std::move(response));
+    //     return;
+    // }
+
+
+    // The code below implies that devices from different replicas can't address one agent. This should be at least DCHECK'ed.
+
+    auto pred = [uuid = msg->DeviceUUID](const auto& device){
+      return device.GetDeviceUUID() == uuid;
+    };
+
+    TVector<ui32> timeoutedAgentDevicesIndexes;
+    auto fillAgentDeviceIndexes = [&timeoutedAgentDevicesIndexes](const NProto::TDeviceConfig& timeoutedDevice, const google::protobuf::RepeatedPtrField<NProto::TDeviceConfig>& devices) {
+        for (int i = 0; i < devices.size(); i++) {
+            if (devices[i].GetAgentId() == timeoutedDevice.GetAgentId()) {
+                timeoutedAgentDevicesIndexes.push_back(i);
+            }
+        }
+    };
+
+    ui32 replicaIndex = 0;
+    const NProto::TDeviceConfig* timeoutedDeviceConfig = FindIfPtr(meta.GetDevices(), pred);
+    if (timeoutedDeviceConfig) {
+        fillAgentDeviceIndexes(*timeoutedDeviceConfig, meta.GetDevices());
+    } else {
+        for (int i = 0; i < meta.GetReplicas().size(); i++) {
+            const auto& replica = meta.GetReplicas()[i];
+            timeoutedDeviceConfig = FindIfPtr(replica.GetDevices(), pred);
+            if (timeoutedDeviceConfig) {
+                replicaIndex = i + 1;
+                fillAgentDeviceIndexes(*timeoutedDeviceConfig, replica.GetDevices());
+                break;
+            }
+        }
+    }
+
+    if (!timeoutedDeviceConfig) {
+        LOG_WARN(
+            ctx,
+            TBlockStoreComponents::VOLUME,
+            "[%lu] Could not find config with device %s among replicas",
+            TabletID(),
+            msg->DeviceUUID.c_str());
+
+        auto response = std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>();
+        NCloud::Reply(ctx, *ev, std::move(response));
+        return;
+    }
+
+    STORAGE_CHECK_PRECONDITION(!timeoutedAgentDevicesIndexes.empty());
+
+    for (const auto& agent: meta.GetLaggingAgentsInfo().GetAgents()) {
+        // Whether the agent is lagging already.
+        if (agent.GetAgentId() == timeoutedDeviceConfig->GetAgentId()) {
+            STORAGE_CHECK_PRECONDITION(agent.GetDevicesIndexes().size() == timeoutedAgentDevicesIndexes.ysize());
+
+            const auto& partActorId =
+                State->GetDiskRegistryBasedPartitionActor();
+            NCloud::Send(
+                ctx,
+                partActorId,
+                std::make_unique<NPartition::TEvPartition::
+                                     TEvEnterIncompleteMirrorRWModeRequest>(
+                    replicaIndex,
+                    timeoutedDeviceConfig->GetAgentId()));
+
+            auto response = std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>();
+            NCloud::Reply(ctx, *ev, std::move(response));
+            return;
+        }
+
+        STORAGE_CHECK_PRECONDITION(IsSorted(timeoutedAgentDevicesIndexes.begin(), timeoutedAgentDevicesIndexes.end()));
+        STORAGE_CHECK_PRECONDITION(IsSorted(agent.GetDevicesIndexes().begin(), agent.GetDevicesIndexes().end()));
+
+        TVector<ui32> intersection;
+        SetIntersection(timeoutedAgentDevicesIndexes.begin(), timeoutedAgentDevicesIndexes.end(), agent.GetDevicesIndexes().begin(), agent.GetDevicesIndexes().end(), std::back_inserter(intersection));
+
+        if (agent.GetReplicaIndex() == replicaIndex) {
+            // "intersection" should be empty since new lagging agent can't have mutual devices with some other lagging agent.
+            STORAGE_CHECK_PRECONDITION(intersection.empty());
+        } else if (!intersection.empty()) {
+            LOG_WARN(
+                ctx,
+                TBlockStoreComponents::VOLUME,
+                "[%lu] Will not add a lagging agent %s, devices: [%s]. Agent's "
+                "devices intersect with already lagging %s, devices: [%s]. "
+                "Intersection: [%s]",
+                TabletID(),
+                timeoutedDeviceConfig->GetAgentId().c_str(),
+                JoinStrings(
+                    timeoutedAgentDevicesIndexes.begin(),
+                    timeoutedAgentDevicesIndexes.end(),
+                    ", ")
+                    .c_str(),
+                agent.GetAgentId().c_str(),
+                JoinStrings(
+                    agent.GetDevicesIndexes().begin(),
+                    agent.GetDevicesIndexes().end(),
+                    ", ")
+                    .c_str(),
+                JoinStrings(intersection.begin(), intersection.end(), ", ")
+                    .c_str());
+
+            // Can't disable RW on more than one replica.
+            auto response = std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>();
+            NCloud::Reply(ctx, *ev, std::move(response));
+            return;
+        }
+    }
+
+    // Enter the incomplete io state.
+
+    auto requestInfo =
+        CreateRequestInfo(ev->Sender, ev->Cookie, ev->Get()->CallContext);
+
+    NProto::TUnavailableAgent unavailableAgent;
+    unavailableAgent.SetAgentId(timeoutedDeviceConfig->GetAgentId());
+    unavailableAgent.SetReplicaIndex(replicaIndex);
+    unavailableAgent.MutableDevicesIndexes()->Assign(
+        timeoutedAgentDevicesIndexes.begin(),
+        timeoutedAgentDevicesIndexes.end());
+    ExecuteTx<TAddLaggingAgent>(
+        ctx,
+        std::move(requestInfo),
+        std::move(unavailableAgent));
+}
+
+bool TVolumeActor::PrepareAddLaggingAgent(
+    const TActorContext& ctx,
+    ITransactionBase::TTransactionContext& tx,
+    TTxVolume::TAddLaggingAgent& args)
+{
+    Y_UNUSED(ctx);
+    Y_UNUSED(tx);
+    Y_UNUSED(args);
+
+    return true;
+}
+
+void TVolumeActor::ExecuteAddLaggingAgent(
+    const TActorContext& ctx,
+    ITransactionBase::TTransactionContext& tx,
+    TTxVolume::TAddLaggingAgent& args)
+{
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::VOLUME,
+        "[%lu] Add lagging agent: %s, replicaIndex: %u, devicesIndexes: [%s]",
+        TabletID(),
+        args.Agent.GetAgentId().c_str(),
+        args.Agent.GetReplicaIndex(),
+        JoinStrings(
+            args.Agent.GetDevicesIndexes().begin(),
+            args.Agent.GetDevicesIndexes().end(),
+            ", ")
+            .c_str());
+
+    TVolumeDatabase db(tx.DB);
+    State->AddLaggingAgent(args.Agent);
+    db.WriteMeta(State->GetMeta());
+}
+
+void TVolumeActor::CompleteAddLaggingAgent(
+    const TActorContext& ctx,
+    TTxVolume::TAddLaggingAgent& args)
+{
+    auto response =
+                std::make_unique<TEvVolume::TEvDeviceTimeoutedResponse>();
+    NCloud::Reply(ctx, *args.RequestInfo, std::move(response));
+
+    // auto request = std::make_unique<NPartition::TEvPartition::TEvEnterIncompleteMirrorRWModeRequest>(args.Info.GetReplicaIndex());
+    // auto ev = std::make_unique<NActors::IEventHandle>(
+    //     ctx.SelfID,
+    //     ctx.SelfID,
+    //     request.release()
+    // );
+
+    // auto keke = NActors::IEventHandle::Downcast<NPartition::TEvPartition::TEvEnterIncompleteMirrorRWModeRequest>(ev.release());
+    // ForwardRequest<NPartition::TEvPartition::TEnterIncompleteMirrorRWModeMethod>(ctx, keke);
+
+
+    // ??????????
+    // If there is no actor - its fine.
+    // If something wrong with config - not sure.
+    if (!State->Ready()) {
+        return;
+    }
+    const auto& partActorId = State->GetDiskRegistryBasedPartitionActor();
+    NCloud::Send(
+        ctx,
+        partActorId,
+        std::make_unique<
+            NPartition::TEvPartition::TEvEnterIncompleteMirrorRWModeRequest>(
+            args.Agent.GetReplicaIndex(), args.Agent.GetAgentId()));
+
+    // Send new mode to partition.
+
+    // Set timeout here, in case DR will not notify us about missing replica?
+}
+
+void TVolumeActor::HandleUpdateSmartResyncState(
+    const TEvVolume::TEvUpdateSmartResyncState::TPtr& ev,
+    const TActorContext& ctx)
+{
+    Y_UNUSED(ev);
+    Y_UNUSED(ctx);
+
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::VOLUME,
+        "[%lu] UpdateSmartResyncState %s",
+        TabletID(),
+        ev->Get()->AgentId.c_str());
+
+    // TODO: UPDATE PROGREESS ON MON PAGE.
+}
+
+void TVolumeActor::HandleSmartResyncFinished(
+    const TEvVolume::TEvSmartResyncFinished::TPtr& ev,
+    const TActorContext& ctx)
+{
+    // TODO: STUFF??
+
+    const auto* msg = ev->Get();
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::VOLUME,
+        "[%lu] SmartResyncFinished %s",
+        TabletID(),
+        msg->AgentId.c_str());
+
+    ExecuteTx<TRemoveLaggingAgent>(
+        ctx,
+        CreateRequestInfo(ev->Sender, ev->Cookie, msg->CallContext),
+        msg->AgentId);
+}
+
+bool TVolumeActor::PrepareRemoveLaggingAgent(
+    const TActorContext& ctx,
+    ITransactionBase::TTransactionContext& tx,
+    TTxVolume::TRemoveLaggingAgent& args)
+{
+    Y_UNUSED(ctx);
+    Y_UNUSED(tx);
+
+    auto agentIdPred = [agentId = args.AgentId](const auto& info)
+    {
+        return info.GetAgentId() == agentId;
+    };
+
+    const auto& laggingAgents =
+        State->GetMeta().GetLaggingAgentsInfo().GetAgents();
+    Y_DEBUG_ABORT_UNLESS(CountIf(laggingAgents, agentIdPred) <= 1);
+    const auto* info = FindIfPtr(laggingAgents, agentIdPred);
+
+    if (!info) {
+        LOG_WARN(
+            ctx,
+            TBlockStoreComponents::VOLUME,
+            "[%lu] Could not find an agent %s in lagging agents list.",
+            TabletID(),
+            args.AgentId.c_str());
+        return false;
+    }
+
+    args.UnavailableAgent = *info;
+    return true;
+}
+
+void TVolumeActor::ExecuteRemoveLaggingAgent(
+    const TActorContext& ctx,
+    ITransactionBase::TTransactionContext& tx,
+    TTxVolume::TRemoveLaggingAgent& args)
+{
+    Y_UNUSED(ctx);
+
+    TVolumeDatabase db(tx.DB);
+    State->RemoveLaggingAgent(args.AgentId);
+    db.WriteMeta(State->GetMeta());
+}
+
+void TVolumeActor::CompleteRemoveLaggingAgent(
+    const TActorContext& ctx,
+    TTxVolume::TRemoveLaggingAgent& args)
+{
+    // Reply to args.requestinfo?
+
+    NCloud::Send(
+        ctx,
+        State->GetDiskRegistryBasedPartitionActor(),
+        std::make_unique<
+            NPartition::TEvPartition::TEvExitIncompleteMirrorRWModeRequest>(
+            args.UnavailableAgent.GetReplicaIndex(),
+            args.UnavailableAgent.GetAgentId()));
+}
+
 bool TVolumeActor::HandleRequests(STFUNC_SIG)
 {
     switch (ev->GetTypeRewrite()) {
@@ -1050,6 +1390,11 @@ STFUNC(TVolumeActor::StateWork)
         HFunc(TEvVolume::TEvUpdateMigrationState, HandleUpdateMigrationState);
         HFunc(TEvVolume::TEvUpdateResyncState, HandleUpdateResyncState);
         HFunc(TEvVolume::TEvResyncFinished, HandleResyncFinished);
+
+        HFunc(TEvVolume::TEvDeviceTimeoutedRequest, HandleDeviceTimeouted);
+        HFunc(TEvVolume::TEvUpdateSmartResyncState, HandleUpdateSmartResyncState);
+        HFunc(TEvVolume::TEvSmartResyncFinished, HandleSmartResyncFinished);
+
 
         HFunc(
             TEvPartitionCommonPrivate::TEvLongRunningOperation,

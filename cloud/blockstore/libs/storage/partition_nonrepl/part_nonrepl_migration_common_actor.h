@@ -104,7 +104,7 @@ private:
     TDisjointRangeSet MigrationsInProgress;
     TDisjointRangeSet DeferredMigrations;
 
-    TChangedRangesMap ChangedRangesMap;
+    TChangedRangesMap NonZeroRangesMap;
 
     // Current migration progress is persistently stored inside a volume tablet.
     // Once we migrated a range that exceeds currently stored one by configured
@@ -157,6 +157,19 @@ public:
         NActors::TActorId statActorId,
         ui32 maxIoDepth);
 
+    TNonreplicatedPartitionMigrationCommonActor(
+        IMigrationOwner* migrationOwner,
+        TStorageConfigPtr config,
+        TString diskId,
+        ui64 blockCount,
+        ui64 blockSize,
+        IProfileLogPtr profileLog,
+        IBlockDigestGeneratorPtr digestGenerator,
+        std::shared_ptr<TCompressedBitmap> migrationBlockMap,
+        TString rwClientId,
+        NActors::TActorId statActorId,
+        ui32 maxIoDepth);
+
     ~TNonreplicatedPartitionMigrationCommonActor() override;
 
     virtual void Bootstrap(const NActors::TActorContext& ctx);
@@ -166,6 +179,7 @@ public:
         const NActors::TActorContext& ctx,
         NActors::TActorId srcActorId,
         NActors::TActorId dstActorId,
+        bool takeOwnershipOverActors,
         std::unique_ptr<TMigrationTimeoutCalculator> timeoutCalculator);
 
     // Called from the inheritor to start migration.
@@ -179,6 +193,10 @@ public:
     // processed.
     ui64 GetBlockCountNeedToBeProcessed() const;
 
+    // Called from the inheritor to get the number of blocks that were
+    // processed.
+    ui64 GetProcessedBlockCount() const;
+
     // IPoisonPillHelperOwner implementation
     void Die(const NActors::TActorContext& ctx) override
     {
@@ -186,7 +204,7 @@ public:
     }
 
 protected:
-    [[nodiscard]] TString GetChangedBlocks(TBlockRange64 range) const;
+    [[nodiscard]] TString GetNonZeroBlocks(TBlockRange64 range) const;
 
 private:
     bool IsMigrationAllowed() const;

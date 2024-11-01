@@ -24,6 +24,7 @@ void TNonreplicatedPartitionMigrationCommonActor::InitWork(
     const NActors::TActorContext& ctx,
     NActors::TActorId srcActorId,
     NActors::TActorId dstActorId,
+    bool takeOwnershipOverActors,
     std::unique_ptr<TMigrationTimeoutCalculator> timeoutCalculator)
 {
     SrcActorId = srcActorId;
@@ -31,8 +32,10 @@ void TNonreplicatedPartitionMigrationCommonActor::InitWork(
     TimeoutCalculator = std::move(timeoutCalculator);
     STORAGE_CHECK_PRECONDITION(TimeoutCalculator);
 
-    PoisonPillHelper.TakeOwnership(ctx, SrcActorId);
-    PoisonPillHelper.TakeOwnership(ctx, DstActorId);
+    if (takeOwnershipOverActors) {
+        PoisonPillHelper.TakeOwnership(ctx, SrcActorId);
+        PoisonPillHelper.TakeOwnership(ctx, DstActorId);
+    }
 
     if (DstActorId == NActors::TActorId{}) {
         ProcessingBlocks.AbortProcessing();
@@ -285,7 +288,7 @@ void TNonreplicatedPartitionMigrationCommonActor::HandleRangeMigrated(
         DescribeRange(msg->Range).c_str());
 
     if (msg->AllZeroes) {
-        ChangedRangesMap.MarkNotChanged(msg->Range);
+        NonZeroRangesMap.MarkNotChanged(msg->Range);
     }
     NotifyMigrationProgressIfNeeded(ctx, msg->Range);
     NotifyMigrationFinishedIfNeeded(ctx);
@@ -335,10 +338,10 @@ void TNonreplicatedPartitionMigrationCommonActor::
     MigrationOwner->OnMigrationFinished(ctx);
 }
 
-TString TNonreplicatedPartitionMigrationCommonActor::GetChangedBlocks(
+TString TNonreplicatedPartitionMigrationCommonActor::GetNonZeroBlocks(
     TBlockRange64 range) const
 {
-    return ChangedRangesMap.GetChangedBlocks(range);
+    return NonZeroRangesMap.GetChangedBlocks(range);
 }
 
 TDuration
