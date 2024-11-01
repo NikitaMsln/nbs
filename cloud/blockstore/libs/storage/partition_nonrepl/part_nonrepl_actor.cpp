@@ -339,7 +339,7 @@ void TNonreplicatedPartitionActor::HandleWakeup(
             );
             deviceStat.LastTimeoutTs = now;
 
-            Y_DEBUG_ABORT_UNLESS(PartConfig->GetDevices().size() <= i);
+            Y_DEBUG_ABORT_UNLESS(PartConfig->GetDevices().size() > i);
             LOG_INFO_S(ctx, TBlockStoreComponents::PARTITION,
                 "Updated deviceStat: DeviceIndex=" << i
                 << ", DeviceUUID=" << PartConfig->GetDevices()[i].GetDeviceUUID()
@@ -373,6 +373,11 @@ void TNonreplicatedPartitionActor::HandleAgentIsUnavailable(
 
     Y_UNUSED(ctx);
     const auto* msg = ev->Get();
+    LOG_INFO_S(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "NPartition::TEvPartition::TEvAgentIsUnavailable. AgentId="
+            << msg->AgentId);
 
     for (int i = 0; i < PartConfig->GetDevices().size(); ++i) {
         if (PartConfig->GetDevices().at(i).GetAgentId() == msg->AgentId) {
@@ -399,6 +404,12 @@ void TNonreplicatedPartitionActor::HandleAgentIsBackOnline(
 {
     Y_UNUSED(ctx);
     const auto* msg = ev->Get();
+
+    LOG_INFO_S(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "NPartition::TEvPartition::TEvAgentIsBackOnline. AgentId="
+            << msg->AgentId);
 
     for (int i = 0; i < PartConfig->GetDevices().size(); ++i) {
         if (PartConfig->GetDevices().at(i).GetAgentId() == msg->AgentId) {

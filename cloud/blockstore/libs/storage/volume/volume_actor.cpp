@@ -1090,6 +1090,20 @@ void TVolumeActor::CompleteAddLaggingAgent(
     // Set timeout here, in case DR will not notify us about missing replica?
 }
 
+void TVolumeActor::HandleEnterIncompleteMirrorRWModeResponse(
+    const NPartition::TEvPartition::TEvEnterIncompleteMirrorRWModeResponse::
+        TPtr& ev,
+    const NActors::TActorContext& ctx)
+{
+    const auto* msg = ev->Get();
+    LOG_INFO(
+        ctx,
+        TBlockStoreComponents::VOLUME,
+        "[%lu] TEvEnterIncompleteMirrorRWModeResponse. Error = %s",
+        TabletID(),
+        FormatError(msg->GetError()).c_str());
+}
+
 void TVolumeActor::HandleUpdateSmartResyncState(
     const TEvVolume::TEvUpdateSmartResyncState::TPtr& ev,
     const TActorContext& ctx)
@@ -1382,6 +1396,9 @@ STFUNC(TVolumeActor::StateWork)
         HFunc(TEvPartition::TEvWaitReadyResponse, HandleWaitReadyResponse);
         HFunc(TEvPartition::TEvBackpressureReport, HandleBackpressureReport);
         HFunc(TEvPartition::TEvGarbageCollectorCompleted, HandleGarbageCollectorCompleted);
+        HFunc(
+            TEvPartition::TEvEnterIncompleteMirrorRWModeResponse,
+            HandleEnterIncompleteMirrorRWModeResponse);
 
         HFunc(TEvLocal::TEvTabletMetrics, HandleTabletMetrics);
 

@@ -34,7 +34,7 @@ TAgentAvailabilityWaiterActor::TAgentAvailabilityWaiterActor(
     , StatActorId(statActorId)
     , AgentId(std::move(agentId))
 {
-    for (const auto& device : partConfig->GetDevices()) {
+    for (const auto& device : PartConfig->GetDevices()) {
         if (device.GetAgentId() == AgentId) {
             break;
         }

@@ -99,10 +99,9 @@ TSplitRequestSenderActor<TMethod>::TSplitRequestSenderActor(
     , ParentActorId(parentActorId)
     , RequestId(requestId)
 {
-    Y_DEBUG_ABORT_UNLESS(!requests.empty());
+    Y_DEBUG_ABORT_UNLESS(!Requests.empty());
     Y_DEBUG_ABORT_UNLESS(!DiskId.empty());
-    Y_DEBUG_ABORT_UNLESS(parentActorId);
-    Y_DEBUG_ABORT_UNLESS(!DiskId.empty());
+    Y_DEBUG_ABORT_UNLESS(ParentActorId);
 }
 
 template <typename TMethod>
@@ -822,6 +821,7 @@ STFUNC(TIncompleteMirrorRWModeControllerActor::StateWork)
         //     HandlePartCounters);
 
         HFunc(TEvents::TEvPoisonPill, HandlePoisonPill);
+        HFunc(TEvents::TEvPoisonTaken, PoisonPillHelper.HandlePoisonTaken);
 
         default:
             // NOTE: We handle all unexpected requests and proxy them to

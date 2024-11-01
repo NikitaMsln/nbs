@@ -14,7 +14,7 @@ void TMirrorPartitionActor::HandlePartCounters(
 {
     auto* msg = ev->Get();
 
-    ui32 i = FindIndex(State.GetReplicaActors(), ev->Sender);
+    ui32 i = FindIndex(State.GetRealReplicaActors(), ev->Sender);
 
     if (i < ReplicaCounters.size()) {
         ReplicaCounters[i] = std::move(msg->DiskCounters);

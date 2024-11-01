@@ -966,6 +966,11 @@ private:
         const TEvVolume::TEvDeviceTimeoutedRequest::TPtr& ev,
         const NActors::TActorContext& ctx);
 
+    void HandleEnterIncompleteMirrorRWModeResponse(
+        const NPartition::TEvPartition::TEvEnterIncompleteMirrorRWModeResponse::
+            TPtr& ev,
+        const NActors::TActorContext& ctx);
+
     void HandleSmartResyncFinished(
         const TEvVolume::TEvSmartResyncFinished::TPtr& ev,
         const NActors::TActorContext& ctx);

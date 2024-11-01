@@ -77,6 +77,7 @@ void TCopyRangeActor::ReadBlocks(const TActorContext& ctx)
 void TCopyRangeActor::WriteBlocks(const TActorContext& ctx, NProto::TIOVector blocks)
 {
     auto request = std::make_unique<TEvService::TEvWriteBlocksRequest>();
+    // request->Record.SetDiskId("") ??
     request->Record.SetStartIndex(Range.Start);
     request->Record.MutableBlocks()->Swap(&blocks);
     auto clientId =
