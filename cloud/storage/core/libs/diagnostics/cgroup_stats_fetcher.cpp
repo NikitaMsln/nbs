@@ -4,6 +4,7 @@
 #include <cloud/storage/core/libs/diagnostics/logging.h>
 #include <cloud/storage/core/libs/diagnostics/monitoring.h>
 #include <cloud/storage/core/libs/common/error.h>
+#include <cloud/storage/core/libs/netlink/netlink.h>
 
 #include <library/cpp/monlib/dynamic_counters/counters.h>
 
@@ -188,141 +189,88 @@ struct TStatsFetcherStub final
 
 ////////////////////////////////////////////////////////////////////////////////
 
-
-class TNetlinkSocket
+struct TKernelTaskDelayAcctStatsFetcher final: public IStatsFetcher
 {
 private:
-    nl_sock* Socket;
-    int Family;
+    const TString ComponentName;
+    const ILoggingServicePtr Logging;
+    const IMonitoringServicePtr Monitoring;
+    TLog Log;
+    std::unique_ptr<NCloud::NNetlink::TNetlinkSocket> NetlinkSocket;
 
 public:
-    TNetlinkSocket(const char* netlinkFamilyName)
+    TKernelTaskDelayAcctStatsFetcher(
+        TString componentName,
+        ILoggingServicePtr logging,
+        IMonitoringServicePtr monitoring)
+        : ComponentName(std::move(componentName))
+        , Logging(std::move(logging))
+        , Monitoring(std::move(monitoring))
     {
-        Socket = nl_socket_alloc();
+    }
 
-        if (Socket == nullptr) {
-            throw TServiceError(E_FAIL) << "unable to allocate netlink socket";
+    ~TKernelTaskDelayAcctStatsFetcher() override {
+        Stop();
+    }
+
+    void Start() override
+    {
+        Log = Logging->CreateLog(ComponentName);
+        NetlinkSocket = std::make_unique<NCloud::NNetlink::TNetlinkSocket>(
+            TASKSTATS_GENL_NAME);
+    }
+
+    void Stop() override
+    {
+        NetlinkSocket.reset();
+    }
+
+    TDuration GetCpuWait() override
+    {
+        if (!NetlinkSocket) {
+            STORAGE_ERROR("Invalid netlink socket");
+            return {};
         }
+        try {
+            int mypid = getpid();
+            NNetlink::TNetlinkMessage message(
+                NetlinkSocket->GetFamily(),
+                TASKSTATS_CMD_GET,
+                NLM_F_REQUEST,
+                TASKSTATS_VERSION);
+            message.Put(TASKSTATS_CMD_ATTR_PID, mypid);
 
-        if (int err = genl_connect(Socket)) {
-            nl_socket_free(Socket);
-            throw TServiceError(E_FAIL)
-                << "unable to connect to generic netlink socket: "
-                << nl_geterror(err);
-        }
-
-        Family = genl_ctrl_resolve(Socket, netlinkFamilyName);
-
-        if (Family < 0) {
-            nl_socket_free(Socket);
-            throw TServiceError(E_FAIL)
-                << "unable to resolve nbd netlink family: "
-                << nl_geterror(Family);
-        }
-    }
-
-    ~TNetlinkSocket()
-    {
-        nl_socket_free(Socket);
-    }
-
-    operator nl_sock*() const
-    {
-        return Socket;
-    }
-
-    int GetFamily() const
-    {
-        return Family;
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
-class TNetlinkMessage
-{
-private:
-    nl_msg* Message;
-
-public:
-    TNetlinkMessage(int family, int command)
-    {
-        Message = nlmsg_alloc();
-        if (Message == nullptr) {
-            throw TServiceError(E_FAIL) << "unable to allocate message";
-        }
-        genlmsg_put(
-            Message,
-            NL_AUTO_PID,
-            NL_AUTO_SEQ,
-            family,
-            0,          // hdrlen
-            NLM_F_REQUEST,
-            command,
-            TASKSTATS_VERSION);
-    }
-
-    ~TNetlinkMessage()
-    {
-        if (Message) {
-            nlmsg_free(Message);
-        }
-    }
-
-    template <typename T>
-    void Put(int attribute, T data)
-    {
-        if (int err = nla_put(Message, attribute, sizeof(T), &data)) {
-            throw TServiceError(E_FAIL) << "unable to put attribute "
-                << attribute << ": " << nl_geterror(err);
-        }
-    }
-
-    void Send(nl_sock* socket)
-    {
-        // send will free message even if it fails
-        auto* message = Message;
-        Message = nullptr;
-        if (int err = nl_send_sync(socket, message)) {
-            throw TServiceError(E_FAIL)
-                << "unable to send message: " << nl_geterror(err);
-        }
-    }
-};
-
-class TCpuDelayReceiver
-{
-    private:
-    nl_sock* Socket;
-    int DelayNanoSeconds = 0;
-public:
-    explicit TCpuDelayReceiver(nl_sock* socket)
-        : Socket(socket)
-    {
-        if (auto err = nl_socket_modify_cb(
-                Socket,
+            NThreading::TPromise<TDuration> cpuDelay;
+            NetlinkSocket->SetCallback(
                 NL_CB_VALID,
-                NL_CB_CUSTOM,
-                TCpuDelayReceiver::CpuDelayCallbackMessage,
-                &DelayNanoSeconds);
-            err < 0)
-        {
-            throw TServiceError(E_FAIL) << "set cb error: " << nl_geterror(err);
+                [this, &cpuDelay](nl_msg* nlmsg)
+                {
+                    auto delayNs = CpuDelayStatHandler(nlmsg);
+                    if (delayNs == -1) {
+                        cpuDelay.SetValue(TDuration::MilliSeconds(0));
+                    } else {
+                        cpuDelay.SetValue(
+                            TDuration::MilliSeconds(delayNs / 1000));
+                    }
+                    return 0;
+                });
+            NetlinkSocket->Send(message);
+            return cpuDelay.GetFuture().ExtractValue();
+        } catch (...) {
+            STORAGE_ERROR(BuildErrorMessageFromException());
         }
+
+        return {};
     }
 
-    TDuration Wait()
+    TString BuildErrorMessageFromException()
     {
-        if (auto err = nl_recvmsgs_default(Socket); err < 0) {
-            throw TServiceError(E_FAIL)
-                << "unable to receive message: " << nl_geterror(err);
-        }
-
-        return TDuration::MilliSeconds(DelayNanoSeconds / 1000);
+        auto msg = TStringBuilder() << "IO error";
+        msg << " with exception " << CurrentExceptionMessage();
+        return msg;
     }
 
-private:
-    static int CpuDelayCallbackMessage(struct nl_msg* nlmsg, void* arg)
+    int CpuDelayStatHandler(nl_msg* nlmsg)
     {
         nlattr* nlattrs[TASKSTATS_TYPE_MAX + 1];
         if (auto rc = genlmsg_parse(
@@ -344,80 +292,10 @@ private:
             int rem = 0;
             auto stats =
                 reinterpret_cast<taskstats*>(nla_data(nla_next(pdata, &rem)));
-            if (arg) {
-                *reinterpret_cast<ui32*>(arg) = stats->cpu_delay_total;
-            }
-            return 0;
-        } else {
-            std::cerr << "unknown attribute format received" << std::endl;
-            return -1;
+            return stats->cpu_delay_total;
         }
-        return 0;
-    }
-};
-
-struct TKernelTaskDelayAcctStatsFetcher final: public IStatsFetcher
-{
-private:
-    const TString ComponentName;
-    const ILoggingServicePtr Logging;
-    const IMonitoringServicePtr Monitoring;
-    TLog Log;
-    std::unique_ptr<TNetlinkSocket> NetlinkSocket;
-
-public:
-    TKernelTaskDelayAcctStatsFetcher(
-        TString componentName,
-        ILoggingServicePtr logging,
-        IMonitoringServicePtr monitoring)
-        : ComponentName(std::move(componentName))
-        , Logging(std::move(logging))
-        , Monitoring(std::move(monitoring))
-    {
-    }
-
-    ~TKernelTaskDelayAcctStatsFetcher() override {
-        Stop();
-    }
-
-    void Start() override
-    {
-        Log = Logging->CreateLog(ComponentName);
-        NetlinkSocket = std::make_unique<TNetlinkSocket>(TASKSTATS_GENL_NAME);
-    }
-
-    void Stop() override
-    {
-        NetlinkSocket.reset();
-    }
-
-    TDuration GetCpuWait() override
-    {
-        if (!NetlinkSocket) {
-            STORAGE_ERROR("Invalid netlink socket");
-            return {};
-        }
-        try {
-            int mypid = getpid();
-            TNetlinkMessage message(
-                NetlinkSocket->GetFamily(),
-                TASKSTATS_CMD_GET);
-            message.Put(TASKSTATS_CMD_ATTR_PID, mypid);
-            TCpuDelayReceiver receiver(*NetlinkSocket);
-            message.Send(*NetlinkSocket);
-            return receiver.Wait();
-        } catch (...) {
-            STORAGE_ERROR(BuildErrorMessageFromException());
-        }
-
-        return {};
-    }
-
-    TString BuildErrorMessageFromException()
-    {
-        auto msg = TStringBuilder() << "IO error";
-        msg << " with exception " << CurrentExceptionMessage();
-        return msg;
+        std::cerr << "unknown attribute format received" << std::endl;
+        return -1;
     }
 };
 

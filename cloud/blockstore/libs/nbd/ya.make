@@ -30,6 +30,7 @@ PEERDIR(
     cloud/blockstore/libs/diagnostics
     cloud/blockstore/libs/service
     cloud/storage/core/libs/coroutine
+    cloud/storage/core/libs/netlink
     contrib/libs/linux-headers
     contrib/restricted/libnl/lib/nl-3
     contrib/restricted/libnl/lib/nl-genl-3
