@@ -4,7 +4,7 @@
 #include <cloud/storage/core/libs/diagnostics/logging.h>
 #include <cloud/storage/core/libs/diagnostics/monitoring.h>
 #include <cloud/storage/core/libs/common/error.h>
-#include <cloud/storage/core/libs/netlink/netlink.h>
+#include <cloud/storage/core/libs/netlink/netlink_socket.h>
 
 #include <library/cpp/monlib/dynamic_counters/counters.h>
 
@@ -196,7 +196,7 @@ private:
     const ILoggingServicePtr Logging;
     const IMonitoringServicePtr Monitoring;
     TLog Log;
-    std::unique_ptr<NCloud::NNetlink::TNetlinkSocket> NetlinkSocket;
+    NCloud::NNetlink::INetlinkSocketPtr NetlinkSocket;
 
 public:
     TKernelTaskDelayAcctStatsFetcher(
@@ -216,8 +216,8 @@ public:
     void Start() override
     {
         Log = Logging->CreateLog(ComponentName);
-        NetlinkSocket = std::make_unique<NCloud::NNetlink::TNetlinkSocket>(
-            TASKSTATS_GENL_NAME);
+        NetlinkSocket =
+            NCloud::NNetlink::CreateNetlinkSocket(TASKSTATS_GENL_NAME);
     }
 
     void Stop() override
