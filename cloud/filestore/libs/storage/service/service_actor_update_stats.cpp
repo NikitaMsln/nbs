@@ -37,23 +37,26 @@ void TStorageServiceActor::HandleUpdateStats(
         auto now = ctx.Now();
 
         auto interval = (now - LastCpuWaitQuery).MicroSeconds();
-        auto cpuWaitValue = StatsFetcher->GetCpuWait().MicroSeconds();
-        auto cpuLack = CpuLackPercentsMultiplier * cpuWaitValue / interval;
+        auto cpuWait = StatsFetcher->GetCpuWait();
+        if (!HasError(cpuWait)) {
+            auto cpuWaitValue = cpuWait.GetResult().MicroSeconds();
+            auto cpuLack = CpuLackPercentsMultiplier * cpuWaitValue / interval;
 
-        LOG_DEBUG_S(
-            ctx,
-            TFileStoreComponents::SERVICE,
-            "CpuWait stats: lack = " << cpuLack << "; interval = " << interval
-                                     << "; wait = " << cpuWaitValue);
-
-        *CpuWait = cpuLack;
-        LastCpuWaitQuery = now;
-
-        if (cpuLack >= StorageConfig->GetCpuLackThreshold()) {
-            LOG_WARN_S(
+            LOG_DEBUG_S(
                 ctx,
                 TFileStoreComponents::SERVICE,
-                "Cpu wait is " << cpuLack);
+                "CpuWait stats: lack = " << cpuLack << "; interval = " << interval
+                                        << "; wait = " << cpuWaitValue);
+
+            *CpuWait = cpuLack;
+            LastCpuWaitQuery = now;
+
+            if (cpuLack >= StorageConfig->GetCpuLackThreshold()) {
+                LOG_WARN_S(
+                    ctx,
+                    TFileStoreComponents::SERVICE,
+                    "Cpu wait is " << cpuLack);
+            }
         }
     }
 

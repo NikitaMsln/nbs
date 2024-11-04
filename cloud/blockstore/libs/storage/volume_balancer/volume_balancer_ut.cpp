@@ -211,7 +211,7 @@ struct TStatsFetcherMock: public NCloud::NStorage::IStatsFetcher
     {
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
         return Value;
     };

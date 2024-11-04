@@ -87,17 +87,24 @@ public:
             return;
         }
 
-        Last = GetCpuWait();
+
+        auto ret = GetCpuWait();
+        if (!ret.HasError()) {
+            STORAGE_ERROR("Failed to get cpu stats: " << ret.GetError());
+        }
+        else {
+            Last = ret.GetResult();
+        }
     }
 
     void Stop() override
     {
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
         if (!CpuAcctWait.IsOpen()) {
-            return {};
+            return MakeError(E_FAIL, "Failed to open stats file");
         }
 
         try {
@@ -109,7 +116,7 @@ public:
                 ReportCpuWaitFatalError();
                 STORAGE_ERROR(StatsFile << " is too large");
                 CpuAcctWait.Close();
-                return {};
+                return MakeError(E_FAIL, "Stats file is too large");
             }
 
             char buf[bufSize];
@@ -122,13 +129,13 @@ public:
             auto value = TDuration::MicroSeconds(FromString<ui64>(buf) / 1000);
 
             if (value < Last) {
-                STORAGE_ERROR(
-                    ReportCpuWaitCounterReadError(
+                auto errorMessage = ReportCpuWaitCounterReadError(
                         TStringBuilder() << StatsFile <<
                         " : new value " << value <<
-                        " is less than previous " << Last));
+                        " is less than previous " << Last);
+                STORAGE_ERROR(errorMessage);
                 Last = value;
-                return {};
+                return MakeError(E_FAIL, std::move(errorMessage));
             }
             auto retval = value - Last;
             Last = value;
@@ -136,10 +143,13 @@ public:
             return retval;
         } catch (...) {
             ReportCpuWaitFatalError();
-            STORAGE_ERROR(BuildErrorMessageFromException())
+            auto errorMessage = BuildErrorMessageFromException();
+            STORAGE_ERROR(errorMessage)
             CpuAcctWait.Close();
-            return {};
+            return MakeError(E_FAIL, errorMessage);
         }
+
+        return MakeError(E_FAIL);
     }
 
     TString BuildErrorMessageFromException()
@@ -181,9 +191,9 @@ struct TStatsFetcherStub final
     {
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
-        return {};
+        return TDuration{};
     }
 };
 
@@ -197,6 +207,7 @@ private:
     const IMonitoringServicePtr Monitoring;
     TLog Log;
     NCloud::NNetlink::INetlinkSocketPtr NetlinkSocket;
+    const TDuration NetlinkSocketTimeout = TDuration::Seconds(1);
 
 public:
     TKernelTaskDelayAcctStatsFetcher(
@@ -225,11 +236,11 @@ public:
         NetlinkSocket.reset();
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
         if (!NetlinkSocket) {
             STORAGE_ERROR("Invalid netlink socket");
-            return {};
+            return MakeError(E_FAIL, "Invalid netlink socket");
         }
         try {
             int mypid = getpid();
@@ -240,14 +251,15 @@ public:
                 TASKSTATS_VERSION);
             message.Put(TASKSTATS_CMD_ATTR_PID, mypid);
 
-            NThreading::TPromise<TDuration> cpuDelay;
+            NThreading::TPromise<TResultOrError<TDuration>> cpuDelay;
             NetlinkSocket->SetCallback(
                 NL_CB_VALID,
                 [this, &cpuDelay](nl_msg* nlmsg)
                 {
                     auto delayNs = CpuDelayStatHandler(nlmsg);
                     if (delayNs == -1) {
-                        cpuDelay.SetValue(TDuration::MilliSeconds(0));
+                        cpuDelay.SetValue(
+                            MakeError(E_FAIL, "Fail to parse netlink message"));
                     } else {
                         cpuDelay.SetValue(
                             TDuration::MilliSeconds(delayNs / 1000));
@@ -255,12 +267,14 @@ public:
                     return 0;
                 });
             NetlinkSocket->Send(message);
-            return cpuDelay.GetFuture().ExtractValue();
+            return cpuDelay.GetFuture().GetValue(NetlinkSocketTimeout);
         } catch (...) {
-            STORAGE_ERROR(BuildErrorMessageFromException());
+            auto errorMessage = BuildErrorMessageFromException();
+            STORAGE_ERROR(errorMessage);
+            return MakeError(E_FAIL, errorMessage);
         }
 
-        return {};
+        return MakeError(E_FAIL);
     }
 
     TString BuildErrorMessageFromException()
