@@ -869,7 +869,8 @@ public:
     bool WriteMixedBlocks(
         TIndexTabletDatabase& db,
         const TPartialBlobId& blobId,
-        /*const*/ TVector<TBlock>& blocks);
+        /*const*/ TVector<TBlock>& blocks,
+        const TBlobCompressionInfo& blobCompressionInfo);
 
     void DeleteMixedBlocks(
         TIndexTabletDatabase& db,
@@ -915,7 +916,8 @@ private:
         TIndexTabletDatabase& db,
         ui32 rangeId,
         const TPartialBlobId& blobId,
-        /*const*/ TVector<TBlock>& blocks);
+        /*const*/ TVector<TBlock>& blocks,
+        const TBlobCompressionInfo& blobCompressionInfo);
 
     void DeleteMixedBlocks(
         TIndexTabletDatabase& db,
