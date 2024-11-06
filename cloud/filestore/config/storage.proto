@@ -456,4 +456,6 @@ message TStorageConfig
 
     // Disables TwoStageRead for HDD filesystems.
     optional bool TwoStageReadDisabledForHDD = 404;
+
+    optional bool BlobCompressionEnabled = 405;
 }
