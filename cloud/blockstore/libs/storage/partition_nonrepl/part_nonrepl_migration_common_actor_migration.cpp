@@ -32,7 +32,8 @@ void TNonreplicatedPartitionMigrationCommonActor::InitWork(
     TimeoutCalculator = std::move(timeoutCalculator);
     STORAGE_CHECK_PRECONDITION(TimeoutCalculator);
 
-    if (takeOwnershipOverActors) {
+    ActorOwner = takeOwnershipOverActors;
+    if (ActorOwner) {
         PoisonPillHelper.TakeOwnership(ctx, SrcActorId);
         PoisonPillHelper.TakeOwnership(ctx, DstActorId);
     }

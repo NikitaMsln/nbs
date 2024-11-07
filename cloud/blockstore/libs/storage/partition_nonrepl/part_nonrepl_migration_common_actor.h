@@ -94,6 +94,7 @@ private:
 
     NActors::TActorId SrcActorId;
     NActors::TActorId DstActorId;
+    bool ActorOwner = false;
     std::unique_ptr<TMigrationTimeoutCalculator> TimeoutCalculator;
 
     TProcessingBlocks ProcessingBlocks;

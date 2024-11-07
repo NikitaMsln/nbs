@@ -383,6 +383,17 @@ void TNonreplicatedPartitionActor::HandleWriteBlocks(
         CalculateWriteRequestBlockCount(msg->Record, PartConfig->GetBlockSize())
     );
 
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "xxxxx AID[%s] TNonreplicatedPartitionActor::HandleWriteBlocks, "
+        "requestId: %lu, sender: %s, "
+        "size: %lu",
+        ctx.SelfID.ToString().c_str(),
+        ev->Cookie,
+        ev->Sender.ToString().c_str(),
+        blockRange.Size());
+
     TVector<TDeviceRequest> deviceRequests;
     TRequest request;
     bool ok = InitRequests<TEvService::TWriteBlocksMethod>(

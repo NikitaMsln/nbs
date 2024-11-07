@@ -52,6 +52,14 @@ TBlockRange64 TMirrorPartitionResyncState::BuildResyncRange() const
     return ProcessingBlocks.BuildProcessingRange();
 }
 
+bool TMirrorPartitionResyncState::DevicesReadyForReading(
+    ui32 replicaIndex,
+    const TBlockRange64 blockRange) const
+{
+    const auto& replicaInfo = ReplicaInfos[replicaIndex];
+    return replicaInfo.Config->DevicesReadyForReading(blockRange);
+}
+
 bool TMirrorPartitionResyncState::AddPendingResyncRange(ui32 rangeId)
 {
     if (!ActiveResyncRangeSet.contains(rangeId)) {

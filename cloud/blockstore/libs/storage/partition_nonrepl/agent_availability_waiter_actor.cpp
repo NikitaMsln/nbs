@@ -105,6 +105,13 @@ void TAgentAvailabilityWaiterActor::HandleReadBlocksResponse(
         return;
     }
 
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "xxxxx TAgentAvailabilityWaiterActor::HandleReadBlocksResponse: "
+        "AID[%s]",
+        ctx.SelfID.ToString().c_str());
+
     NCloud::Send<NPartition::TEvPartition::TEvAgentIsBackOnline>(
         ctx,
         ParentActorId,

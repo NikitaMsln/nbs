@@ -89,8 +89,16 @@ void TMirrorPartitionActor::Bootstrap(const TActorContext& ctx)
 
 void TMirrorPartitionActor::KillActors(const TActorContext& ctx)
 {
-    for (const auto& actorId: State.GetReplicaActors()) {
-        NCloud::Send<TEvents::TEvPoisonPill>(ctx, actorId);
+    const size_t replicaCount = State.GetReplicaActors().size();
+    for (size_t i = 0; i < replicaCount; ++i) {
+        if (State.IsLaggingProxySet(i)) {
+            NCloud::Send<TEvents::TEvPoisonPill>(
+                ctx,
+                State.GetReplicaActors()[i]);
+        }
+        NCloud::Send<TEvents::TEvPoisonPill>(
+            ctx,
+            State.GetRealReplicaActors()[i]);
     }
 }
 
@@ -243,8 +251,7 @@ void TMirrorPartitionActor::StartResyncRange(
     const auto& replicaInfos = State.GetReplicaInfos();
     const auto& replicaActors = State.GetReplicaActors();
     for (ui32 i = 0; i < replicaInfos.size(); i++) {
-        if (replicaInfos[i].Config->DevicesReadyForReading(GetScrubbingRange()))
-        {
+        if (State.DevicesReadyForReading(i, GetScrubbingRange())) {
             replicas.emplace_back(
                 replicaInfos[i].Config->GetName(),
                 i,
@@ -280,7 +287,8 @@ void TMirrorPartitionActor::HandlePoisonPill(
 
     KillActors(ctx);
 
-    AliveReplicas = State.GetReplicaActors().size();
+    AliveReplicas =
+        State.GetReplicaActors().size() + State.LaggingReplicaCount();
 
     Poisoner = CreateRequestInfo(
         ev->Sender,
@@ -385,7 +393,7 @@ void TMirrorPartitionActor::HandleScrubbingNextRange(
     const auto& replicaInfos = State.GetReplicaInfos();
     const auto& replicaActors = State.GetReplicaActors();
     for (ui32 i = 0; i < replicaInfos.size(); i++) {
-        if (replicaInfos[i].Config->DevicesReadyForReading(scrubbingRange)) {
+        if (State.DevicesReadyForReading(i, scrubbingRange)) {
             replicas.emplace_back(
                 replicaInfos[i].Config->GetName(),
                 i,
@@ -516,7 +524,7 @@ void TMirrorPartitionActor::HandleEnterIncompleteMirrorRWMode(
 
     // Send message to it with agent id
 
-    if (!State.IsProxySet(msg->ReplicaIndex)) {
+    if (!State.IsLaggingProxySet(msg->ReplicaIndex)) {
         Y_DEBUG_ABORT_UNLESS(
             State.GetReplicaInfos().size() > msg->ReplicaIndex);
         Y_DEBUG_ABORT_UNLESS(
@@ -533,7 +541,7 @@ void TMirrorPartitionActor::HandleEnterIncompleteMirrorRWMode(
                 State.GetRealReplicaActors()[msg->ReplicaIndex],
                 StatActorId,
                 SelfId()));
-        auto error = State.SetReplicaProxy(msg->ReplicaIndex, proxyActorId);
+        auto error = State.SetLaggingReplicaProxy(msg->ReplicaIndex, proxyActorId);
         if (HasError(error)) {
             NCloud::Reply(
                 ctx,
@@ -582,11 +590,12 @@ void TMirrorPartitionActor::HandleExitIncompleteMirrorRWMode(
     }
 
     // TODO: What happens with in-flight requests?
-    // DO NOT POISON IF THERE IS MORE THAT ONE UNAVAILABLE AGENT.
-    if (State.IsProxySet(msg->ReplicaIndex)) {
+
+    // TODO: DO NOT POISON IF THERE IS MORE THAT ONE UNAVAILABLE AGENT.
+    if (State.IsLaggingProxySet(msg->ReplicaIndex)) {
         auto proxy = State.GetReplicaActors()[msg->ReplicaIndex];
         NCloud::Send<TEvents::TEvPoisonPill>(ctx, proxy);
-        auto error = State.ResetReplicaProxy(msg->ReplicaIndex);
+        auto error = State.ResetLaggingReplicaProxy(msg->ReplicaIndex);
         Y_DEBUG_ABORT_UNLESS(!HasError(error));
     }
 }
@@ -688,6 +697,7 @@ STFUNC(TMirrorPartitionActor::StateWork)
             HandlePartCounters);
 
         HFunc(TEvents::TEvPoisonPill, HandlePoisonPill);
+        IgnoreFunc(TEvents::TEvPoisonTaken);
 
         default:
             HandleUnexpectedEvent(ev, TBlockStoreComponents::PARTITION);

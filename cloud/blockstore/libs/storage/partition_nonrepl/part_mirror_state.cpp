@@ -191,9 +191,7 @@ NProto::TError TMirrorPartitionState::NextReadReplica(
     ui32 replicaIndex = 0;
     for (ui32 i = 0; i < ReplicaActors.size(); ++i) {
         replicaIndex = ReadReplicaIndex++ % ReplicaActors.size();
-        const auto& replicaInfo = ReplicaInfos[replicaIndex];
-        if (replicaInfo.Config->DevicesReadyForReading(readRange) &&
-            !IsProxySet(replicaIndex))
+        if (DevicesReadyForReading(replicaIndex, readRange))
         {
             *actorId = ReplicaActors[replicaIndex];
             return {};
@@ -206,7 +204,16 @@ NProto::TError TMirrorPartitionState::NextReadReplica(
                          << " targets only fresh/dummy devices");
 }
 
-NProto::TError TMirrorPartitionState::ResetReplicaProxy(ui32 replicaIndex)
+bool TMirrorPartitionState::DevicesReadyForReading(
+    ui32 replicaIndex,
+    const TBlockRange64 blockRange) const
+{
+    const auto& replicaInfo = ReplicaInfos[replicaIndex];
+    return !IsLaggingProxySet(replicaIndex) &&
+           replicaInfo.Config->DevicesReadyForReading(blockRange);
+}
+
+NProto::TError TMirrorPartitionState::ResetLaggingReplicaProxy(ui32 replicaIndex)
 {
     if (ReplicaActors.size() <= replicaIndex) {
         return MakeError(
@@ -214,12 +221,12 @@ NProto::TError TMirrorPartitionState::ResetReplicaProxy(ui32 replicaIndex)
             TStringBuilder() << "Can't reset proxy of index: " << replicaIndex);
     }
 
-    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == ReplicaActorProxies.size());
-    ReplicaActorProxies[replicaIndex] = ReplicaActors[replicaIndex];
+    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == LaggingReplicaProxies.size());
+    LaggingReplicaProxies[replicaIndex] = ReplicaActors[replicaIndex];
     return {};
 }
 
-NProto::TError TMirrorPartitionState::SetReplicaProxy(
+NProto::TError TMirrorPartitionState::SetLaggingReplicaProxy(
     ui32 replicaIndex,
     const NActors::TActorId& actorId)
 {
@@ -229,19 +236,30 @@ NProto::TError TMirrorPartitionState::SetReplicaProxy(
             TStringBuilder() << "Can't add proxy to index: " << replicaIndex);
     }
 
-    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == ReplicaActorProxies.size());
-    ReplicaActorProxies[replicaIndex] = actorId;
+    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == LaggingReplicaProxies.size());
+    LaggingReplicaProxies[replicaIndex] = actorId;
     return {};
 }
 
-bool TMirrorPartitionState::IsProxySet(ui32 replicaIndex) const
+bool TMirrorPartitionState::IsLaggingProxySet(ui32 replicaIndex) const
 {
     if (ReplicaActors.size() <= replicaIndex) {
         return false;
     }
 
-    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == ReplicaActorProxies.size());
-    return ReplicaActors[replicaIndex] != ReplicaActorProxies[replicaIndex];
+    Y_DEBUG_ABORT_UNLESS(ReplicaActors.size() == LaggingReplicaProxies.size());
+    return ReplicaActors[replicaIndex] != LaggingReplicaProxies[replicaIndex];
+}
+
+size_t TMirrorPartitionState::LaggingReplicaCount() const
+{
+    size_t count = 0;
+    for (size_t i = 0; i < ReplicaActors.size(); ++i) {
+        if (IsLaggingProxySet(i)) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 ui32 TMirrorPartitionState::GetBlockSize() const

@@ -536,6 +536,12 @@ void TVolumeActor::ExecuteUpdateDevices(
     const auto& oldMeta = State->GetMeta();
     auto newMeta = CreateNewMeta(oldMeta, args);
 
+    // Get lagging agent
+    // if the device is dissapeared, then remove it.
+    for (const auto& laggingAgent : oldMeta.GetLaggingAgentsInfo().GetAgents()) {
+
+    }
+
     Y_DEBUG_ABORT_UNLESS(State->IsDiskRegistryMediaKind());
     if (Config->GetAllowLiteDiskReallocations()) {
         auto differencer = CreateNodeIdChangeDifferencer();

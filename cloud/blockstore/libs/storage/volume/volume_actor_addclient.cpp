@@ -503,19 +503,19 @@ void TVolumeActor::CompleteAddClient(
 
     OnClientListUpdate(ctx);
 
-    const auto mediaKind =
-        State->GetMeta().GetConfig().GetStorageMediaKind();
+    // const auto mediaKind =
+    //     State->GetMeta().GetConfig().GetStorageMediaKind();
 
-    if (IsReliableDiskRegistryMediaKind(mediaKind)) {
-        const bool shouldResyncDueToInactivity = args.WriterLastActivityTimestamp
-            && (ctx.Now() - args.WriterLastActivityTimestamp)
-                > Config->GetResyncAfterClientInactivityInterval();
+    // if (IsReliableDiskRegistryMediaKind(mediaKind)) {
+    //     const bool shouldResyncDueToInactivity = args.WriterLastActivityTimestamp
+    //         && (ctx.Now() - args.WriterLastActivityTimestamp)
+    //             > Config->GetResyncAfterClientInactivityInterval();
 
-        if (args.WriterChanged || shouldResyncDueToInactivity) {
-            State->SetReadWriteError(MakeError(E_REJECTED, "toggling resync"));
-            ExecuteTx<TToggleResync>(ctx, nullptr, true);
-        }
-    }
+    //     if (args.WriterChanged || shouldResyncDueToInactivity) {
+    //         State->SetReadWriteError(MakeError(E_REJECTED, "toggling resync"));
+    //         ExecuteTx<TToggleResync>(ctx, nullptr, true);
+    //     }
+    // }
 }
 
 void TVolumeActor::OnClientListUpdate(const NActors::TActorContext& ctx)

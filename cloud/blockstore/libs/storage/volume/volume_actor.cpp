@@ -944,8 +944,14 @@ void TVolumeActor::HandleDeviceTimeouted(
     for (const auto& agent: meta.GetLaggingAgentsInfo().GetAgents()) {
         // Whether the agent is lagging already.
         if (agent.GetAgentId() == timeoutedDeviceConfig->GetAgentId()) {
-            STORAGE_CHECK_PRECONDITION(agent.GetDevicesIndexes().size() == timeoutedAgentDevicesIndexes.ysize());
+            LOG_WARN(
+                ctx,
+                TBlockStoreComponents::VOLUME,
+                "[%lu] Agent %s is already lagging",
+                TabletID(),
+                agent.GetAgentId().c_str());
 
+            STORAGE_CHECK_PRECONDITION(agent.GetDevicesIndexes().size() == timeoutedAgentDevicesIndexes.ysize());
             const auto& partActorId =
                 State->GetDiskRegistryBasedPartitionActor();
             NCloud::Send(

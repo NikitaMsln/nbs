@@ -63,6 +63,12 @@ TSmartResyncActor::~TSmartResyncActor() = default;
 
 void TSmartResyncActor::OnBootstrap(const TActorContext& ctx)
 {
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "xxxxx TSmartResyncActor::OnBootstrap: AID[%s]",
+        ctx.SelfID.ToString().c_str());
+
     InitWork(
         ctx,
         MirrorPartitionActor,

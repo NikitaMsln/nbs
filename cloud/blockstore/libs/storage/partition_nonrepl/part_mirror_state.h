@@ -25,7 +25,7 @@ private:
     TMigrations Migrations;
     TVector<TReplicaInfo> ReplicaInfos;
     TVector<NActors::TActorId> ReplicaActors;
-    TVector<NActors::TActorId> ReplicaActorProxies;
+    TVector<NActors::TActorId> LaggingReplicaProxies;
 
     ui32 ReadReplicaIndex = 0;
 
@@ -47,13 +47,13 @@ public:
 
     void AddReplicaActor(const NActors::TActorId& actorId)
     {
-        ReplicaActorProxies.push_back(actorId);
+        LaggingReplicaProxies.push_back(actorId);
         ReplicaActors.push_back(actorId);
     }
 
     const TVector<NActors::TActorId>& GetReplicaActors() const
     {
-        return ReplicaActorProxies;
+        return LaggingReplicaProxies;
     }
 
     const TVector<NActors::TActorId>& GetRealReplicaActors() const
@@ -71,11 +71,16 @@ public:
         return RWClientId;
     }
 
-    [[nodiscard]] NProto::TError SetReplicaProxy(
+    [[nodiscard]] bool DevicesReadyForReading(
+        ui32 replicaIndex,
+        const TBlockRange64 blockRange) const;
+
+    [[nodiscard]] NProto::TError SetLaggingReplicaProxy(
         ui32 replicaIndex,
         const NActors::TActorId& actorId);
-    [[nodiscard]] NProto::TError ResetReplicaProxy(ui32 replicaIndex);
-    bool IsProxySet(ui32 replicaIndex) const;
+    [[nodiscard]] NProto::TError ResetLaggingReplicaProxy(ui32 replicaIndex);
+    [[nodiscard]] bool IsLaggingProxySet(ui32 replicaIndex) const;
+    [[nodiscard]] size_t LaggingReplicaCount() const;
 
     [[nodiscard]] NProto::TError Validate();
     void PrepareMigrationConfig();

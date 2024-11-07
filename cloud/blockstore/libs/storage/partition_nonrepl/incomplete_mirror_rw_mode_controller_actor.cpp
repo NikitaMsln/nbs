@@ -46,7 +46,6 @@ class TSplitRequestSenderActor final
 private:
     const TRequestInfoPtr RequestInfo;
     TVector<TSplitRequest> Requests;
-    const TString DiskId;
     const NActors::TActorId ParentActorId;
     const ui64 RequestId;
 
@@ -59,7 +58,6 @@ public:
     TSplitRequestSenderActor(
         TRequestInfoPtr requestInfo,
         TVector<TSplitRequest> requests,
-        TString diskId,
         NActors::TActorId parentActorId,
         ui64 requestId);
     ~TSplitRequestSenderActor() override = default;
@@ -90,17 +88,14 @@ template <typename TMethod>
 TSplitRequestSenderActor<TMethod>::TSplitRequestSenderActor(
     TRequestInfoPtr requestInfo,
     TVector<TSplitRequest> requests,
-    TString diskId,
     NActors::TActorId parentActorId,
     ui64 requestId)
     : RequestInfo(std::move(requestInfo))
     , Requests(std::move(requests))
-    , DiskId(std::move(diskId))
     , ParentActorId(parentActorId)
     , RequestId(requestId)
 {
     Y_DEBUG_ABORT_UNLESS(!Requests.empty());
-    Y_DEBUG_ABORT_UNLESS(!DiskId.empty());
     Y_DEBUG_ABORT_UNLESS(ParentActorId);
 }
 
@@ -123,6 +118,15 @@ template <typename TMethod>
 void TSplitRequestSenderActor<TMethod>::SendRequests(const NActors::TActorContext& ctx) {
     for (auto& request: Requests) {
         Y_DEBUG_ABORT_UNLESS(request.CallContext);
+
+        LOG_WARN(
+            ctx,
+            TBlockStoreComponents::PARTITION_WORKER,
+            "xxxxx AID[%s] TSplitRequestSenderActor<%s> SendRequest %lu to %s",
+            ctx.SelfID.ToString().c_str(),
+            TMethod::Name,
+            RequestId,
+            request.RecipientActorId.ToString().c_str());
 
         auto event = std::make_unique<NActors::IEventHandle>(
             request.RecipientActorId,
@@ -202,10 +206,10 @@ void TSplitRequestSenderActor<TMethod>::HandleUndelivery(
     Y_UNUSED(ev);
 
     // TODO: FIX log
-    LOG_WARN(ctx, TBlockStoreComponents::PARTITION_WORKER,
-        "[%s] %s request undelivered to some nonrepl partitions",
-        DiskId.c_str(),
-        TMethod::Name);
+    // LOG_WARN(ctx, TBlockStoreComponents::PARTITION_WORKER,
+    //     "[%s] %s request undelivered to some nonrepl partitions",
+    //     DiskId.c_str(),
+    //     TMethod::Name);
 
     Record.MutableError()->CopyFrom(MakeError(E_REJECTED, TStringBuilder()
         << TMethod::Name << " request undelivered to some nonrepl partitions"));
@@ -224,14 +228,14 @@ void TSplitRequestSenderActor<TMethod>::HandleResponse(
 {
     auto* msg = ev->Get();
 
-    if (HasError(msg->Record)) {
-        // TODO: FIX log
-        LOG_ERROR(ctx, TBlockStoreComponents::PARTITION_WORKER,
-            "[%s] %s got error from nonreplicated partition: %s",
-            DiskId.c_str(),
-            TMethod::Name,
-            FormatError(msg->Record.GetError()).c_str());
-    }
+    // if (HasError(msg->Record)) {
+    //     // TODO: FIX log
+    //     LOG_ERROR(ctx, TBlockStoreComponents::PARTITION_WORKER,
+    //         "[%s] %s got error from nonreplicated partition: %s",
+    //         DiskId.c_str(),
+    //         TMethod::Name,
+    //         FormatError(msg->Record.GetError()).c_str());
+    // }
 
     if (!HasError(Record)) {
         Record = std::move(msg->Record);
@@ -240,6 +244,14 @@ void TSplitRequestSenderActor<TMethod>::HandleResponse(
     if (++Responses < Requests.size()) {
         return;
     }
+
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION_WORKER,
+        "xxxxx AID[%s] Handle response %s with request id: %lu",
+        this->SelfId().ToString().c_str(),
+        TMethod::Name,
+        RequestId);
 
     Done(ctx);
 }
@@ -305,7 +317,7 @@ TIncompleteMirrorRWModeControllerActor::
 
 void TIncompleteMirrorRWModeControllerActor::Bootstrap(const TActorContext& ctx)
 {
-    PoisonPillHelper.TakeOwnership(ctx, PartNonreplActorId);
+    Y_UNUSED(ctx);
     Become(&TThis::StateWork);
 }
 
@@ -333,8 +345,12 @@ bool TIncompleteMirrorRWModeControllerActor::ShouldSplitWriteRequest(
         }
     }
 
-    Unique(states.begin(), states.end());
-    return states.size() != 1;
+    // Just in case, there should be a maximum of 2 elements.
+    Sort(states.begin(), states.end());
+
+    auto lastIt = Unique(states.begin(), states.end());
+    states.erase(lastIt, states.end());
+    return states.size() > 1;
 }
 
 void TIncompleteMirrorRWModeControllerActor::OnMigrationProgress(
@@ -526,6 +542,16 @@ void TIncompleteMirrorRWModeControllerActor::WriteRequest(
 {
     auto* msg = ev->Get();
 
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION_WORKER,
+        "xxxxx AID[%s] Handle "
+        "TIncompleteMirrorRWModeControllerActor::WriteRequest "
+        "requestid = %lu, sender = %s",
+        SelfId().ToString().c_str(),
+        ev->Cookie,
+        ev->Sender.ToString().c_str());
+
     const ui32 requestBlockCount = CalculateWriteRequestBlockCount(
         msg->Record,
         PartConfig->GetBlockSize());
@@ -538,20 +564,30 @@ void TIncompleteMirrorRWModeControllerActor::WriteRequest(
         deviceRequests,
         [this](const auto& deviceRequest)
         { return AgentIsUnavailable(deviceRequest.Device.GetAgentId()); });
+
     if (shouldRespondWithSuccess) {
+        LOG_WARN(
+            ctx,
+            TBlockStoreComponents::PARTITION_WORKER,
+            "xxxxx Respond With fake Success. diskid = %s, requestid = %lu",
+            PartConfig->GetName().c_str(),
+            ev->Cookie);
+
         MarkBlocksAsDirty(deviceRequests[0].Device.GetAgentId(), blockRange);
         NCloud::Reply(ctx, *ev, std::make_unique<typename TMethod::TResponse>());
         return;
     }
 
-    auto requests = SplitRequest<TMethod>(ev, deviceRequests);
-    Y_DEBUG_ABORT_UNLESS(requests.size() == deviceRequests.size());
+    auto requests = SplitRequest<TMethod>(ctx, ev, deviceRequests);
+    Y_DEBUG_ABORT_UNLESS(!requests.empty());
+    Y_DEBUG_ABORT_UNLESS(requests.size() <= deviceRequests.size());
     for (const auto& deviceRequest: deviceRequests) {
         const auto& agentId = deviceRequest.Device.GetAgentId();
         if (AgentIsUnavailable(agentId)) {
             MarkBlocksAsDirty(agentId, deviceRequest.BlockRange);
         }
     }
+    // TODO: send only one of the requests.
     NCloud::Register(
         ctx,
         std::make_unique<TSplitRequestSenderActor<TMethod>>(
@@ -560,13 +596,13 @@ void TIncompleteMirrorRWModeControllerActor::WriteRequest(
                 ev->Cookie,
                 msg->CallContext),
             std::move(requests),
-            msg->Record.GetDiskId(),
             SelfId(),
             GetRequestId(msg->Record)));
 }
 
 template <typename TMethod>
 TVector<TSplitRequest> TIncompleteMirrorRWModeControllerActor::SplitRequest(
+    const NActors::TActorContext& ctx,
     const TMethod::TRequest::TPtr& ev,
     const TVector<TDeviceRequest>& deviceRequests)
 {
@@ -583,6 +619,11 @@ TVector<TSplitRequest> TIncompleteMirrorRWModeControllerActor::SplitRequest(
             GetRecipientActorId(deviceRequests[0].Device.GetAgentId()));
         return result;
     }
+
+    LOG_ERROR(
+        ctx,
+        TBlockStoreComponents::PARTITION_WORKER,
+        "xxxxx ShouldSplitWriteRequest!!!");
 
     return DoSplitRequest(ev, deviceRequests);
 }
@@ -694,7 +735,6 @@ void TIncompleteMirrorRWModeControllerActor::HandleWriteBlocks(
     const TActorContext& ctx)
 {
     WriteRequest<TEvService::TWriteBlocksMethod>(ev, ctx);
-    auto request = std::make_unique<TEvService::TWriteBlocksMethod::TRequest>();
 }
 
 void TIncompleteMirrorRWModeControllerActor::HandleWriteBlocksLocal(

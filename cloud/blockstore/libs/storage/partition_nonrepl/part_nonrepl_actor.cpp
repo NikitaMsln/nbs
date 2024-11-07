@@ -56,6 +56,14 @@ TDuration TNonreplicatedPartitionActor::GetMaxRequestTimeout() const
 void TNonreplicatedPartitionActor::Bootstrap(const TActorContext& ctx)
 {
     Become(&TThis::StateWork);
+
+    LOG_WARN(
+        ctx,
+        TBlockStoreComponents::PARTITION,
+        "xxxxx TNonreplicatedPartitionActor::Bootstrap: AID[%s], agentId = %s",
+        ctx.SelfID.ToString().c_str(),
+        PartConfig->GetDevices()[0].GetAgentId().c_str());
+
     ScheduleCountersUpdate(ctx);
     ctx.Schedule(GetMinRequestTimeout(), new TEvents::TEvWakeup());
 }

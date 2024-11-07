@@ -167,6 +167,19 @@ void TVolumeActor::SetupDiskRegistryBasedPartitions(const TActorContext& ctx)
     const bool useSimpleMigrationBandwidthLimiter =
         IsReliableDiskRegistryMediaKind(mediaKind);
 
+    // Should be somewhere in standalone state method.
+    // It will be called in reallocate transaction and init transaction.
+    if (!State->GetMeta().GetLaggingAgentsInfo().GetAgents().empty()) {
+        // Mark devices fresh.
+
+        // Check that it is not destructive change.
+
+        // Notify the DR about fresh devices ?
+        // This way DR can't corrupt our data, right?
+
+        // Remove lagging agents info
+    }
+
     auto nonreplicatedConfig = std::make_shared<TNonreplicatedPartitionConfig>(
         State->GetMeta().GetDevices(),
         State->GetMeta().GetIOMode(),

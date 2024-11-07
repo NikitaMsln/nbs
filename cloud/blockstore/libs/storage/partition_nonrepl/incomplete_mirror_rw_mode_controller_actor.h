@@ -88,6 +88,7 @@ private:
 
     template <typename TMethod>
     TVector<TSplitRequest> SplitRequest(
+        const NActors::TActorContext& ctx,
         const TMethod::TRequest::TPtr& ev,
         const TVector<TDeviceRequest>& deviceRequests);
 
