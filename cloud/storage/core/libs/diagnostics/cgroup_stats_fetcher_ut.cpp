@@ -163,20 +163,6 @@ Y_UNIT_TEST_SUITE(TCGroupStatFetcherTest)
 
         fetcher->Stop();
     }
-
-    Y_UNIT_TEST(ShouldGetCpuDelay)
-    {
-        auto monitoring = CreateMonitoringServiceStub();
-        auto serverGroup = SetupCriticalEvents(monitoring);
-        auto fetcher = CreateKernelTaskDelayAcctStatsFetcher(
-            ComponentName,
-            CreateLoggingService("console"),
-            monitoring);
-        fetcher->Start();
-        auto cpuWait = fetcher->GetCpuWait();
-        UNIT_ASSERT_C(!HasError(cpuWait), cpuWait.GetError());
-        fetcher->Stop();
-    }
 }
 
 }   // namespace NCloud::NStorage

@@ -242,6 +242,7 @@ public:
             STORAGE_ERROR("Invalid netlink socket");
             return MakeError(E_FAIL, "Invalid netlink socket");
         }
+
         try {
             int mypid = getpid();
             NNetlink::TNetlinkMessage message(
@@ -251,7 +252,7 @@ public:
                 TASKSTATS_VERSION);
             message.Put(TASKSTATS_CMD_ATTR_PID, mypid);
 
-            NThreading::TPromise<TResultOrError<TDuration>> cpuDelay;
+            auto cpuDelay = NThreading::NewPromise<TResultOrError<TDuration>>();
             NetlinkSocket->SetCallback(
                 NL_CB_VALID,
                 [this, &cpuDelay](nl_msg* nlmsg)
