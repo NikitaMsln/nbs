@@ -93,6 +93,43 @@ void TVolumeActor::ExecuteLoadState(
     for (const auto& o: args.OutdatedCheckpointRequestIds) {
         db.DeleteCheckpointEntry(o);
     }
+
+    if (args.Meta.Defined() && MarkLaggingDevicesAsFresh(*args.Meta)) {
+        db.WriteMeta(*args.Meta);
+    }
+}
+
+// static
+bool TVolumeActor::MarkLaggingDevicesAsFresh(NProto::TVolumeMeta& meta)
+{
+    if (!IsReliableDiskRegistryMediaKind(
+            meta.GetConfig().GetStorageMediaKind()) ||
+        meta.GetLaggingAgentsInfo().GetAgents().empty())
+    {
+        return false;
+    }
+
+    auto getReplicaDevices = [&meta](i32 replicaIndex) {
+        if (replicaIndex == 0) {
+            return meta.GetDevices();
+        }
+        Y_DEBUG_ABORT_UNLESS(meta.GetReplicas().size() > replicaIndex - 1);
+        return meta.GetReplicas()[replicaIndex - 1].GetDevices();
+    };
+
+    for (const auto& agent: meta.GetLaggingAgentsInfo().GetAgents()) {
+        const auto& devices = getReplicaDevices(agent.GetReplicaIndex());
+
+        for (i32 index: agent.GetDevicesIndexes()) {
+            auto* newFreshDevice = meta.MutableFreshDeviceIds()->Add();
+            Y_DEBUG_ABORT_UNLESS(meta.GetDevices().size() > index);
+            *newFreshDevice = meta.GetDevices()[index].GetDeviceUUID();
+        }
+    }
+
+    meta.MutableLaggingAgentsInfo()->Clear();
+
+    return true;
 }
 
 void TVolumeActor::CompleteLoadState(

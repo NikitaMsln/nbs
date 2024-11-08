@@ -376,6 +376,8 @@ public:
     static TString GetStateName(ui32 state);
 
 private:
+    static bool MarkLaggingDevicesAsFresh(NProto::TVolumeMeta& meta);
+
     void Enqueue(STFUNC_SIG) override;
     void DefaultSignalTabletActive(const NActors::TActorContext& ctx) override;
 

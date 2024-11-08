@@ -168,7 +168,7 @@ void TVolumeActor::SetupDiskRegistryBasedPartitions(const TActorContext& ctx)
         IsReliableDiskRegistryMediaKind(mediaKind);
 
     // Should be somewhere in standalone state method.
-    // It will be called in reallocate transaction and init transaction.
+    // It will be called in reallocate transaction and init transaction .
     if (!State->GetMeta().GetLaggingAgentsInfo().GetAgents().empty()) {
         // Mark devices fresh.
 

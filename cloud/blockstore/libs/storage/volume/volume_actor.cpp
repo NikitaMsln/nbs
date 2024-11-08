@@ -883,7 +883,7 @@ void TVolumeActor::HandleDeviceTimeouted(
 
     // Device list can change (resize, migrations, freshes, reallocates).
     // If lagging device is removed -> we need to remove it from DB.
-    // If device is added, maybe should check that it belongs to some lagging agent.
+    // If device is added, maybe should check that it belongs to some lagging agent!
 
     // It's safer to do nothing.
     // ??????????????????????
