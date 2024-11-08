@@ -57,6 +57,11 @@ void TStorageServiceActor::HandleUpdateStats(
                     TFileStoreComponents::SERVICE,
                     "Cpu wait is " << cpuLack);
             }
+        } else {
+            LOG_ERROR_S(
+                ctx,
+                TFileStoreComponents::SERVICE,
+                "Failed to get Cpu wait " << cpuWait.GetError());
         }
     }
 

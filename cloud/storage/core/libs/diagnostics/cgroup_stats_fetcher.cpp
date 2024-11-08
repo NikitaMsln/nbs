@@ -114,9 +114,8 @@ public:
 
             if (CpuAcctWait.GetLength() >= bufSize - 1) {
                 ReportCpuWaitFatalError();
-                STORAGE_ERROR(StatsFile << " is too large");
                 CpuAcctWait.Close();
-                return MakeError(E_FAIL, "Stats file is too large");
+                return MakeError(E_FAIL, StatsFile + " is too large");
             }
 
             char buf[bufSize];
@@ -133,7 +132,6 @@ public:
                         TStringBuilder() << StatsFile <<
                         " : new value " << value <<
                         " is less than previous " << Last);
-                STORAGE_ERROR(errorMessage);
                 Last = value;
                 return MakeError(E_FAIL, std::move(errorMessage));
             }
@@ -144,9 +142,8 @@ public:
         } catch (...) {
             ReportCpuWaitFatalError();
             auto errorMessage = BuildErrorMessageFromException();
-            STORAGE_ERROR(errorMessage)
             CpuAcctWait.Close();
-            return MakeError(E_FAIL, errorMessage);
+            return MakeError(E_FAIL, std::move(errorMessage));
         }
 
         return MakeError(E_FAIL);
@@ -239,7 +236,6 @@ public:
     TResultOrError<TDuration> GetCpuWait() override
     {
         if (!NetlinkSocket) {
-            STORAGE_ERROR("Invalid netlink socket");
             return MakeError(E_FAIL, "Invalid netlink socket");
         }
 
@@ -271,7 +267,6 @@ public:
             return cpuDelay.GetFuture().GetValue(NetlinkSocketTimeout);
         } catch (...) {
             auto errorMessage = BuildErrorMessageFromException();
-            STORAGE_ERROR(errorMessage);
             return MakeError(E_FAIL, errorMessage);
         }
 

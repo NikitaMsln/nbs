@@ -86,6 +86,9 @@ int main(int argc, const char** argv)
             auto interval = pollInterval.MicroSeconds();
             Cout << (waitTime / interval) << Endl;
         }
+        else {
+            Cout << cpuWait.GetError() << Endl;
+        }
     }
 
     return 0;
