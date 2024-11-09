@@ -245,7 +245,14 @@ void TVolumeBalancerActor::HandleGetVolumeStatsResponse(
         auto now = ctx.Now();
 
         auto interval = (now - LastCpuWaitQuery).MicroSeconds();
-        auto cpuLack = CpuLackPercentsMultiplier * StatsFetcher->GetCpuWait().MicroSeconds();
+        auto cpuWait = StatsFetcher->GetCpuWait();
+        if (HasError(cpuWait)) {
+            LOG_ERROR_S(ctx, TBlockStoreComponents::VOLUME_BALANCER,
+                "Failed to get cpu wait: " << cpuWait.GetError());
+        }
+        auto cpuLack =
+            CpuLackPercentsMultiplier *
+            (HasError(cpuWait) ? 0 : cpuWait.GetResult().MicroSeconds());
         cpuLack /= interval;
         *CpuWait = cpuLack;
 
