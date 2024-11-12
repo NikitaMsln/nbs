@@ -82,10 +82,10 @@ public:
     {
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
         if (!CpuAcctWait.IsOpen()) {
-            return {};
+            return MakeError(E_FAIL, "Failed to open " + StatsFile);
         }
 
         try {
@@ -95,9 +95,8 @@ public:
 
             if (CpuAcctWait.GetLength() >= bufSize - 1) {
                 ReportCpuWaitFatalError();
-                STORAGE_ERROR(StatsFile << " is too large");
                 CpuAcctWait.Close();
-                return {};
+                return MakeError(E_FAIL, StatsFile + " is too large");
             }
 
             char buf[bufSize];
@@ -110,13 +109,11 @@ public:
             auto value = TDuration::MicroSeconds(FromString<ui64>(buf) / 1000);
 
             if (value < Last) {
-                STORAGE_ERROR(
-                    ReportCpuWaitCounterReadError(
-                        TStringBuilder() << StatsFile <<
-                        " : new value " << value <<
-                        " is less than previous " << Last));
+                auto errorMessage = ReportCpuWaitCounterReadError(
+                    TStringBuilder() << StatsFile << " : new value " << value
+                                     << " is less than previous " << Last);
                 Last = value;
-                return {};
+                return MakeError(E_FAIL, std::move(errorMessage));
             }
             auto retval = value - Last;
             Last = value;
@@ -124,10 +121,12 @@ public:
             return retval;
         } catch (...) {
             ReportCpuWaitFatalError();
-            STORAGE_ERROR(BuildErrorMessageFromException())
+            auto errorMessage = BuildErrorMessageFromException();
             CpuAcctWait.Close();
-            return {};
+            return MakeError(E_FAIL, std::move(errorMessage));
         }
+
+        return MakeError(E_FAIL);
     }
 
     TString BuildErrorMessageFromException()
@@ -169,7 +168,7 @@ struct TCgroupStatsFetcherStub final
     {
     }
 
-    TDuration GetCpuWait() override
+    TResultOrError<TDuration> GetCpuWait() override
     {
         return {};
     }
